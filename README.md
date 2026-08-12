@@ -1,7 +1,6 @@
 # MAX.Bot — .NET клиент для API мессенджера MAX
 
-[![NuGet](https://img.shields.io/nuget/v/SaaSoft.MAX.Bot)](https://www.nuget.org/packages/SaaSoft.MAX.Bot)
-[![NuGet Downloads](https://img.shields.io/nuget/dt/SaaSoft.MAX.Bot)](https://www.nuget.org/packages/SaaSoft.MAX.Bot)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Библиотека для создания ботов в мессенджере [MAX](https://max.ru/) на платформе .NET. Предоставляет полный набор методов для работы с сообщениями, чатами, участниками, вложениями и событиями в реальном времени.
@@ -17,17 +16,7 @@
 - ⚙️ **DI** — готовая интеграция с `Microsoft.Extensions.DependencyInjection`
 - 🔁 **Rate limiting** — автоматические повторы при HTTP 429
 
-## Установка
 
-```bash
-dotnet add package SaaSoft.MAX.Bot
-```
-
-Или через NuGet Package Manager:
-
-```
-Install-Package SaaSoft.MAX.Bot
-```
 
 ### Поддерживаемые платформы
 
@@ -38,6 +27,25 @@ Install-Package SaaSoft.MAX.Bot
 API MAX работает на `https://platform-api2.max.ru` и использует TLS-сертификаты Национального удостоверяющего центра Минцифры. Без их установки запросы будут завершаться ошибкой SSL/TLS.
 
 Установите сертификаты на машине, где запускается бот. Инструкция и файлы — на [госуслугах](https://www.gosuslugi.ru/crt).
+
+#### Docker
+
+Добавьте в `Dockerfile` перед запуском приложения:
+
+```dockerfile
+# Установка доверенных корневых сертификатов Минцифры РФ (для работы по защищённому SSL)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    curl -fsSL -o /usr/local/share/ca-certificates/russian_trusted_root_ca.crt \
+      https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt && \
+    curl -fsSL -o /usr/local/share/ca-certificates/russian_trusted_sub_ca.crt \
+      https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt && \
+    update-ca-certificates && \
+    apt-get purge -y curl && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+```
+
 
 ## Быстрый старт
 
@@ -402,3 +410,7 @@ await bot.UnsubscribeAsync(new DeleteSubscriptionRequest
 ## Лицензия
 
 MIT © 2026 kanl
+
+## Первоисточник
+
+Проект на репозитории [SaaSoft/max-bot-api-client-dotnet](https://github.com/SaaSoft/max-bot-api-client-dotnet).
