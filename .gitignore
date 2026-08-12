@@ -1,0 +1,10 @@
+**/.vs/*
+Examples/TestApp/.vs/*
+Examples/TestApp/bin/Debug/*
+Examples/TestApp/obj/*
+MAX.Bot/bin/*
+MAX.Bot/obj/*
+.idea/*
+.DS_Store
+SaaSoft.MAX.Bot.sln.DotSettings.user
+.temp

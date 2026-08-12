@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFrameworks>net8.0;net9.0;net10.0;net462;</TargetFrameworks>
+		<LangVersion>11.0</LangVersion>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+		<PackageId>SaaSoft.MAX.Bot</PackageId>
+		<Version>2.0.0</Version>
+		<Authors>kanl</Authors>
+		<Company>kanl</Company>
+		<Description>.NET клиент для работы с API мессенджера MAX. Библиотека предоставляет полный набор методов для взаимодействия с ботами, включая отправку сообщений, управление чатами и обработку событий в реальном времени.</Description>
+		<PackageTags>maxbot;api;client;chatbot;messenger</PackageTags>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+		<PackageOutputPath>../Examples/Releases</PackageOutputPath>
+		<PackageProjectUrl>https://github.com/SaaSoft/max-bot-api-client-dotnet</PackageProjectUrl>
+		<RepositoryType>git</RepositoryType>
+		<RepositoryUrl>https://github.com/SaaSoft/max-bot-api-client-dotnet</RepositoryUrl>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(TargetFramework)' == 'net462'">
+		<DefineConstants>NET462</DefineConstants>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Using Include="System" />
+		<Using Include="System.Collections.Generic" />
+		<Using Include="System.IO" />
+		<Using Include="System.Linq" />
+		<Using Include="System.Net" />
+		<Using Include="System.Net.Http" />
+		<Using Include="System.Text" />
+		<Using Include="System.Threading" />
+		<Using Include="System.Threading.Tasks" />
+		<Using Include="System.Text.Json.Serialization" />
+		<Using Include="System.Text.Json" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- Явно указываем путь к README -->
+		<None Include="..\README.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
+	
+	<ItemGroup>
+		<PackageReference Include="System.Text.Json" Version="10.0.8" />
+		<PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="10.0.8" />
+		<PackageReference Include="Microsoft.Bcl.Memory" Version="10.0.8" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
+		<PackageReference Include="Microsoft.Extensions.Http" Version="10.0.8" />
+	</ItemGroup>
+</Project>
