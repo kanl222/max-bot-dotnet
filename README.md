@@ -1,238 +1,404 @@
-# MAX Bot Client для .NET
+# MAX.Bot — .NET клиент для API мессенджера MAX
 
-.NET клиент для работы с API мессенджера MAX. Библиотека предоставляет полный набор методов для взаимодействия с ботами, включая отправку сообщений, управление чатами и обработку событий в реальном времени.
+[![NuGet](https://img.shields.io/nuget/v/SaaSoft.MAX.Bot)](https://www.nuget.org/packages/SaaSoft.MAX.Bot)
+[![NuGet Downloads](https://img.shields.io/nuget/dt/SaaSoft.MAX.Bot)](https://www.nuget.org/packages/SaaSoft.MAX.Bot)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## Особенности
+Библиотека для создания ботов в мессенджере [MAX](https://max.ru/) на платформе .NET. Предоставляет полный набор методов для работы с сообщениями, чатами, участниками, вложениями и событиями в реальном времени.
 
-- ✅ **Долгосрочный polling** — обработка событий в реальном времени
-- ✅ **Dependency Injection** — готовая интеграция с ASP.NET Core
-- ✅ **Вложения** — скачивание image/video/file, выбор качества видео
-- ✅ **Повторы** — автоматические retry при обработке вложений API
+## Возможности
+
+- 📨 **Сообщения** — отправка, редактирование, удаление, получение
+- 💬 **Чаты** — управление групповыми чатами, закреплённые сообщения, действия бота
+- 👥 **Участники** — управление пользователями и администраторами
+- 📎 **Вложения** — загрузка файлов, изображений, видео, аудио; скачивание вложений
+- 🔔 **События** — long polling с типизированными событиями
+- 🔗 **Webhook** — управление подписками
+- ⚙️ **DI** — готовая интеграция с `Microsoft.Extensions.DependencyInjection`
+- 🔁 **Rate limiting** — автоматические повторы при HTTP 429
 
 ## Установка
 
-### Через NuGet Package Manager
-```bash
-Install-Package SaaSoft.MAX.Bot
-```
-
-### Через .NET CLI
 ```bash
 dotnet add package SaaSoft.MAX.Bot
 ```
 
-### Через PackageReference
-```xml
-<PackageReference Include="SaaSoft.MAX.Bot" Version="1.2.0" />
+Или через NuGet Package Manager:
+
 ```
+Install-Package SaaSoft.MAX.Bot
+```
+
+### Поддерживаемые платформы
+
+`net8.0` · `net9.0` · `net10.0` · `net462`
 
 ### Сертификаты Минцифры
 
-API MAX работает на `https://platform-api2.max.ru` и использует TLS-сертификаты Национального удостоверяющего центра Минцифры (Russian Trusted CA). Этого корневого сертификата нет в стандартном хранилище доверенных CA Windows и .NET, поэтому без его установки запросы могут завершаться ошибкой SSL/TLS.
+API MAX работает на `https://platform-api2.max.ru` и использует TLS-сертификаты Национального удостоверяющего центра Минцифры. Без их установки запросы будут завершаться ошибкой SSL/TLS.
 
-Добавьте сертификаты Минцифры в доверенные на машине, где запускается бот (Windows, Linux или сервер). Инструкция и файлы сертификатов — на портале Госуслуг: [gosuslugi.ru/crt](https://www.gosuslugi.ru/crt).
+Установите сертификаты на машине, где запускается бот. Инструкция и файлы — на [госуслугах](https://www.gosuslugi.ru/crt).
 
 ## Быстрый старт
 
-### 1. Получение токена бота
-
-Перед началом работы получите токен бота в [Личном кабинете разработчика MAX](https://dev.max.ru).
-
-### 2. Базовое использование
+Получите токен бота в [Личном кабинете разработчика MAX](https://dev.max.ru).
 
 ```csharp
 using MAX.Bot;
 using MAX.Bot.Interfaces;
 using MAX.Bot.Interfaces.Models;
+using MAX.Bot.Interfaces.Models.Request.Message;
 
-// Создание клиента с токеном
-var botClient = new MaxBotClient("YOUR_BOT_TOKEN");
+var bot = new MaxBotClient("YOUR_BOT_TOKEN");
 
-// Получение информации о боте
-var botInfo = await botClient.GetMeAsync();
-Console.WriteLine($"Бот: {botInfo.FirstName} (ID: {botInfo.Id})");
+// Информация о боте
+var me = await bot.GetMeAsync();
+Console.WriteLine($"Бот: {me.FirstName} (ID: {me.Id})");
 
-// Отправка сообщения
-await botClient.SendMessageAsync(new SendMessageRequest
+// Подписка на входящие сообщения
+bot.OnMessageCreated += async (update, client) =>
 {
-    ChatId = 123456789,
-    Text = "Привет от бота! 👋",
-    Format = MessageFormat.Markdown,
-});
-
-// Подписка на события (ивенты)
-botClient.OnMessageCreated += async (update, client) =>
-{
-    Console.WriteLine($"Сообщение: {update.Message?.Body?.Text}");
+    var text = update.Message?.Body?.Text;
+    var chatId = update.Message?.Recipient.ChatId ?? 0;
 
     await client.SendMessageAsync(new SendMessageRequest
     {
-        Text = "Ответ на: " + update.Message?.Body?.Text,
-        ChatId = update.Message?.Recipient.ChatId ?? 0,
+        ChatId = chatId,
+        Text = $"Вы написали: {text}",
     });
 };
 
-botClient.OnMessageCallback += async (update, client) =>
-{
-    Console.WriteLine($"Нажата кнопка с payload: {update.Callback?.Payload}");
-};
+// Запуск polling в фоне
+bot.StartPolling(limit: 100, timeout: 90);
 
-// Запуск фонового polling
-botClient.StartPolling(limit: 100, timeout: 90);
+Console.ReadLine();
+bot.StopPolling();
 ```
 
 ## Способы создания клиента
 
-### 1. Простой конструктор (рекомендуется для консольных приложений)
+### Простой конструктор
 
 ```csharp
-using MAX.Bot.Interfaces.Models.Attachment;
+// Базовый — таймаут 30 секунд по умолчанию
+var bot = new MaxBotClient("your_token");
 
-// С токеном и таймаутом по умолчанию (30 секунд)
-var client = new MaxBotClient("your_token_here");
-
-// С кастомным таймаутом и retry для вложений
-var client = new MaxBotClient("your_token_here", timeoutSeconds: 60,
-    attachmentRetryOptions: new AttachmentRetryOptions { MaxAttempts = 4, RetryDelay = TimeSpan.FromSeconds(2) });
+// С кастомным таймаутом и настройками retry для вложений
+var bot = new MaxBotClient("your_token",
+    timeoutSeconds: 60,
+    attachmentRetryOptions: new AttachmentRetryOptions
+    {
+        MaxAttempts = 5,
+        RetryDelay = TimeSpan.FromSeconds(3),
+    });
 ```
 
-### 2. Dependency Injection (рекомендуется для ASP.NET Core)
+### Dependency Injection (ASP.NET Core)
 
 ```csharp
-// В Program.cs
-builder.Services.AddMaxBotClient(builder.Configuration["MaxBot:Token"]);
+// Program.cs
+using MAX.Bot.Extensions;
 
-// В классе сервиса
-public class BotService
+builder.Services.AddMaxBotClient(
+    token: builder.Configuration["MaxBot:Token"]!,
+    timeoutSeconds: 60);
+```
+
+```csharp
+// В сервисе
+public class BotService(IMaxBotClient bot)
 {
-    private readonly IMaxBotClient _botClient;
-    
-    public BotService(IMaxBotClient botClient)
+    public async Task SendGreeting(long chatId)
     {
-        _botClient = botClient;
-    }
-    
-    public async Task SendWelcomeMessage(long chatId)
-    {
-        await _botClient.SendMessageAsync(new SendMessageRequest
+        await bot.SendMessageAsync(new SendMessageRequest
         {
             ChatId = chatId,
-            Text = "Добро пожаловать!"
+            Text = "Добро пожаловать! 👋",
         });
     }
 }
 ```
 
-## Скачивание файлов
+## Работа с событиями
+
+Все события принимают `async`-обработчики. Если зарегистрировано несколько обработчиков — они вызываются параллельно.
+
+```csharp
+// Любое входящее обновление
+bot.OnUpdate += async (update, client) => { ... };
+
+// Новое сообщение
+bot.OnMessageCreated += async (update, client) => { ... };
+
+// Редактирование сообщения
+bot.OnMessageEdited += async (update, client) => { ... };
+
+// Удаление сообщения
+bot.OnMessageRemoved += async (update, client) => { ... };
+
+// Нажата кнопка inline-клавиатуры
+bot.OnMessageCallback += async (update, client) => { ... };
+
+// Бот добавлен в чат / запущен / остановлен / удалён из чата
+bot.OnBotAddedToChat += async (update, client) => { ... };
+bot.OnBotStarted     += async (update, client) => { ... };
+bot.OnBotStopped     += async (update, client) => { ... };
+bot.OnBotRemovedFromChat += async (update, client) => { ... };
+
+// Изменения в чате
+bot.OnChatTitleChanged    += async (update, client) => { ... };
+bot.OnUserAddedToChat     += async (update, client) => { ... };
+bot.OnUserRemovedFromChat += async (update, client) => { ... };
+
+// Диалог
+bot.OnDialogCleared   += async (update, client) => { ... };
+bot.OnDialogMuted     += async (update, client) => { ... };
+bot.OnDialogUnmuted   += async (update, client) => { ... };
+bot.OnDialogRemoved   += async (update, client) => { ... };
+
+// Ошибки в процессе polling
+bot.OnPollingError += async (ex) => { Console.Error.WriteLine(ex); };
+```
+
+## Отправка вложений
+
+### Inline-клавиатура
+
+```csharp
+using MAX.Bot.Interfaces.Models.Request.Message.Attachment;
+using MAX.Bot.Interfaces.Models.Request.Message.Attachment.Payloads;
+
+await bot.SendMessageAsync(new SendMessageRequest
+{
+    ChatId = chatId,
+    Text = "Выберите действие:",
+    Attachments =
+    [
+        new InlineKeyboardAttachment
+        {
+            Payload = new InlineKeyboardPayload
+            {
+                Buttons =
+                [
+                    [ new LinkButton     { Text = "Перейти",    Url  = "https://max.ru" } ],
+                    [ new CallbackButton { Text = "Подтвердить", Payload = "confirm" } ],
+                    [ new RequestGeoButton { Text = "Отправить геолокацию", Quick = true } ],
+                ]
+            }
+        }
+    ]
+});
+```
+
+### Загрузка файла и отправка
+
+```csharp
+using MAX.Bot.Interfaces.Models.Request;
+using MAX.Bot.Interfaces.Models.Request.Message.Attachment;
+using MAX.Bot.Interfaces.Models.Request.Message.Attachment.Payloads;
+
+// 1. Загрузить файл и получить токен
+await using var stream = File.OpenRead("document.pdf");
+var token = await bot.UploadAsync(new UploadRequest
+{
+    Type = UploadType.File,
+    Content = stream,
+    FileName = "document.pdf",
+    ContentType = "application/pdf",
+});
+
+// 2. Отправить сообщение с вложением
+await bot.SendMessageAsync(new SendMessageRequest
+{
+    ChatId = chatId,
+    Text = "Документ",
+    Attachments =
+    [
+        new FileAttachment { Payload = new FilePayload { Token = token } }
+    ]
+});
+```
+
+### Скачивание вложений из сообщения
 
 ```csharp
 using MAX.Bot.Interfaces.Models.Attachment;
 using MAX.Bot.Interfaces.Models.Response;
 
-var message = await botClient.GetMessageByIdAsync("message_id");
+var message = await bot.GetMessageByIdAsync("message_id");
 
 foreach (var attachment in message.Body?.Attachments ?? [])
 {
     try
     {
-        var result = await botClient.DownloadAttachmentAsync(attachment, new DownloadAttachmentOptions
+        // Сохранить в файл
+        var result = await bot.DownloadAttachmentAsync(attachment, new DownloadAttachmentOptions
         {
             FilePath = Path.Combine("downloads", message.Body!.Mid!),
             VideoQuality = VideoQuality.Mp4_720,
         });
-
         Console.WriteLine($"Сохранено: {result.SavedFilePath}");
+
+        // Или получить байты в памяти
+        // var result = await bot.DownloadAttachmentAsync(attachment, new DownloadAttachmentOptions());
+        // byte[] content = result.Content!;
     }
     catch (NotSupportedException)
     {
-        // sticker, keyboard и др. — скачивание не поддерживается
+        // Sticker, inline-keyboard и др. — скачивание не поддерживается
     }
 }
 ```
 
-Без `FilePath` содержимое возвращается в `result.Content`:
+## Управление чатами
 
 ```csharp
-var result = await botClient.DownloadAttachmentAsync(attachment, new DownloadAttachmentOptions
+// Список чатов
+var chats = await bot.GetChatsAsync(new GetChatsRequest { Count = 10 });
+
+// Информация о чате
+var chat = await bot.GetChatByIdAsync(chatId);
+
+// Обновление названия
+await bot.UpdateChatAsync(chatId, new UpdateChatRequest { Title = "Новое название" });
+
+// Закрепить сообщение
+await bot.PinChatMessageAsync(chatId, new PinChatMessageRequest
 {
-    VideoQuality = VideoQuality.Mp4_720,
+    MessageId = messageId,
+    Notify = true,
 });
 
-var content = result.Content!;
-Console.WriteLine($"Получено {content.Length} байт");
+// Открепить сообщение
+await bot.UnpinChatMessageAsync(chatId);
+
+// Действие бота (например, "печатает...")
+await bot.SendChatActionAsync(chatId, new SendChatActionRequest
+{
+    Action = SenderActions.TypingOn,
+});
 ```
 
-## API методов
+## Управление участниками
 
-Документация API методов для реализации в библиотеке.
+```csharp
+// Список участников
+var members = await bot.GetChatMembersAsync(new GetChatMembersRequest { ChatId = chatId });
 
-### Легенда статусов
+// Добавить пользователя
+await bot.AddChatMemberAsync(new AddChatMemberRequest
+{
+    ChatId = chatId,
+    UserIds = [userId],
+});
 
-- ✅ — Реализовано полностью
-- 🚧 — Реализовано частично
-- ❌ — Не реализовано
+// Удалить пользователя
+await bot.DeleteChatMemberAsync(new DeleteChatMemberRequest
+{
+    ChatId = chatId,
+    UserId = userId,
+});
 
-### Методы API
+// Назначить администратора
+await bot.AddChatAdminsAsync(chatId, new AddChatAdminsRequest
+{
+    Admins =
+    [
+        new ChatAdmin
+        {
+            UserId = userId,
+            Permissions = [ChatAdminPermission.Write, ChatAdminPermission.PinMessage],
+            Alias = "Модератор",
+        }
+    ]
+});
+```
 
-#### 🤖 Bots
+## Webhook
 
-| Метод | Описание | Ссылка | Статус |
-|-------|----------|--------|--------|
-| GET | Получение информации о боте | `GET/me` | ✅ |
+```csharp
+// Создать подписку
+await bot.SubscribeAsync(new SubscriptionRequest
+{
+    Url = "https://your-domain.com/webhook",
+    UpdateTypes = [UpdateTypes.MessageCreated, UpdateTypes.MessageCallback],
+    Secret = "your-secret",
+});
 
-#### ✉️ Messages
+// Список подписок
+var subscriptions = await bot.GetSubscriptionsAsync();
 
-| Метод | Описание | Ссылка | Статус |
-|-------|----------|--------|--------|
-| GET | Получение сообщений | `GET/messages` | ✅ |
-| POST | Отправить сообщение | `POST/messages` | ✅ |
-| PUT | Редактировать сообщение | `PUT/messages` | ✅ |
-| DEL | Удалить сообщение | `DELETE/messages` | ✅ |
-| GET | Получить сообщение | `GET/messages/-messageId-` | ✅ |
-| GET | Получить информацию о видео | `GET/videos/-videoToken-` | ✅ |
-| POST | Ответ на callback | `POST/answers` | ✅ |
+// Удалить подписку
+await bot.UnsubscribeAsync(new DeleteSubscriptionRequest
+{
+    Url = "https://your-domain.com/webhook",
+});
+```
 
+## API-методы
 
-#### 💬 Chats
+### Легенда
 
-| Метод | Описание | Ссылка | Статус |
-|-------|----------|--------|--------|
-| GET | Получение списка всех групповых чатов | `GET/chats` | ✅ |
-| GET | Получение информации о групповом чате | `GET/chats/-chatId-` | ✅ |
-| PATCH | Изменение информации о групповом чате | `PATCH/chats/-chatId-` | ✅ |
-| DEL | Удаление группового чата | `DELETE/chats/-chatId-` | ✅ |
-| POST | Отправка действия бота в групповой чат | `POST/chats/-chatId-/actions` | ✅ |
-| GET | Получение закреплённого сообщения в групповом чате | `GET/chats/-chatId-/pin` | ✅ |
-| PUT | Закрепление сообщения в групповом чате | `PUT/chats/-chatId-/pin` | ✅ |
-| DEL | Удаление закреплённого сообщения в групповом чате | `DELETE/chats/-chatId-/pin` | ✅ |
-| GET | Получение информации о членстве бота в групповом чате | `GET/chats/-chatId-/members/me` | ✅ |
-| DEL | Удаление бота из группового чата | `DELETE/chats/-chatId-/members/me` | ✅ |
-| GET | Получение списка администраторов группового чата | `GET/chats/-chatId-/members/admins` | ✅ |
-| POST | Назначить администратора группового чата | `POST/chats/-chatId-/members/admins` | ✅ |
-| DEL | Отменить права администратора в групповом чате | `DELETE/chats/-chatId-/members/admins/-userId-` | ✅ |
-| GET | Получение участников группового чата | `GET/chats/-chatId-/members` | ✅ |
-| POST | Добавление участников в групповой чат | `POST/chats/-chatId-/members` | ✅ |
-| DEL | Удаление участника из группового чата | `DELETE/chats/-chatId-/members` | ✅ |
+| Статус | Значение |
+|--------|----------|
+| ✅ | Реализовано |
+| 🚧 | Частично |
+| ❌ | Не реализовано |
 
-#### 📡 Subscriptions
+### 🤖 Bot
 
-| Метод | Описание | Ссылка | Статус |
-|-------|----------|--------|--------|
-| GET | Получение подписок | `GET/subscriptions` | ✅ |
-| POST | Подписка на обновления | `POST/subscriptions` | ✅ |
-| DEL | Отписка от обновлений | `DELETE/subscriptions` | ✅ |
-| GET | Получение обновлений | `GET/updates` | ✅ |
+| Метод | Описание | Статус |
+|-------|----------|--------|
+| `GET /me` | Информация о боте | ✅ |
 
-#### 📁 Upload
+### ✉️ Messages
 
-| Метод | Описание | Ссылка | Статус |
-|-------|----------|--------|--------|
-| POST | Загрузка файлов | `POST/uploads` | ✅ |
+| Метод | Описание | Статус |
+|-------|----------|--------|
+| `GET /messages` | Получить сообщения | ✅ |
+| `POST /messages` | Отправить сообщение | ✅ |
+| `PUT /messages` | Редактировать сообщение | ✅ |
+| `DELETE /messages` | Удалить сообщение | ✅ |
+| `GET /messages/{id}` | Получить сообщение по ID | ✅ |
+| `GET /videos/{token}` | Информация о видео | ✅ |
+| `POST /answers` | Ответить на callback | ✅ |
 
-## Лицензия и первоисточник
+### 💬 Chats
 
-Проект распространяется под лицензией [MIT](LICENSE).
+| Метод | Описание | Статус |
+|-------|----------|--------|
+| `GET /chats` | Список чатов | ✅ |
+| `GET /chats/{id}` | Информация о чате | ✅ |
+| `PATCH /chats/{id}` | Обновить чат | ✅ |
+| `DELETE /chats/{id}` | Удалить чат | ✅ |
+| `POST /chats/{id}/actions` | Действие бота | ✅ |
+| `GET /chats/{id}/pin` | Закреплённое сообщение | ✅ |
+| `PUT /chats/{id}/pin` | Закрепить сообщение | ✅ |
+| `DELETE /chats/{id}/pin` | Открепить сообщение | ✅ |
+| `GET /chats/{id}/members/me` | Членство бота | ✅ |
+| `DELETE /chats/{id}/members/me` | Покинуть чат | ✅ |
+| `GET /chats/{id}/members/admins` | Список администраторов | ✅ |
+| `POST /chats/{id}/members/admins` | Назначить администратора | ✅ |
+| `DELETE /chats/{id}/members/admins/{userId}` | Снять права администратора | ✅ |
+| `GET /chats/{id}/members` | Список участников | ✅ |
+| `POST /chats/{id}/members` | Добавить участников | ✅ |
+| `DELETE /chats/{id}/members` | Удалить участника | ✅ |
 
-- **Автор:** kanl
-- **Первоисточник:** [SaaSoft/max-bot-api-client-dotnet](https://github.com/SaaSoft/max-bot-api-client-dotnet)
+### 📡 Subscriptions
 
+| Метод | Описание | Статус |
+|-------|----------|--------|
+| `GET /subscriptions` | Список подписок | ✅ |
+| `POST /subscriptions` | Создать подписку | ✅ |
+| `DELETE /subscriptions` | Удалить подписку | ✅ |
+| `GET /updates` | Получить обновления | ✅ |
+
+### 📁 Upload
+
+| Метод | Описание | Статус |
+|-------|----------|--------|
+| `POST /uploads` | Загрузить файл | ✅ |
+
+## Лицензия
+
+MIT © 2026 kanl
