@@ -7,7 +7,7 @@ namespace MAX.Bot.Interfaces;
 /// Фасад клиента для работы с API MAX Bot.
 /// Доступ ко всем методам — через свойства-модули.
 /// </summary>
-public interface IMaxBotClient : IDisposable
+public interface IMaxBotClient : IDisposable, IAsyncDisposable
 {
     /// <summary>Методы для работы с сообщениями.</summary>
     IMessagesModule Messages { get; }
@@ -26,6 +26,9 @@ public interface IMaxBotClient : IDisposable
 
     /// <summary>Методы для управления Webhook-подписками.</summary>
     ISubscriptionsModule Subscriptions { get; }
+
+    /// <summary>Методы для работы с комментариями к сообщениям каналов.</summary>
+    ICommentsModule Comments { get; }
 
     /// <summary>Вызывается при получении любого входящего обновления.</summary>
     event Func<Update, IMaxBotClient, Task>? OnUpdate;
@@ -75,6 +78,18 @@ public interface IMaxBotClient : IDisposable
     /// <summary>Вызывается при удалении диалога пользователем.</summary>
     event Func<DialogRemovedUpdate, IMaxBotClient, Task>? OnDialogRemoved;
 
+    /// <summary>Вызывается при создании нового комментария к сообщению канала.</summary>
+    event Func<CommentCreatedUpdate, IMaxBotClient, Task>? OnCommentCreated;
+
+    /// <summary>Вызывается при редактировании комментария к сообщению канала.</summary>
+    event Func<CommentEditedUpdate, IMaxBotClient, Task>? OnCommentEdited;
+
+    /// <summary>Вызывается при удалении комментария к сообщению канала.</summary>
+    event Func<CommentRemovedUpdate, IMaxBotClient, Task>? OnCommentRemoved;
+
+    /// <summary>Вызывается при изменении прав администратора у бота в чате или канале.</summary>
+    event Func<BotAdminPermissionsChangedUpdate, IMaxBotClient, Task>? OnBotAdminPermissionsChanged;
+
     /// <summary>Вызывается при возникновении ошибки во время долгосрочного опроса.</summary>
     event Func<Exception, Task>? OnPollingError;
 
@@ -82,6 +97,29 @@ public interface IMaxBotClient : IDisposable
     /// Получить информацию о текущем боте.
     /// </summary>
     Task<User> GetMeAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Получить полную информацию о текущем боте, включая список зарегистрированных команд.
+    /// </summary>
+    /// <param name="cancellationToken">Токен отмены операции.</param>
+    /// <returns>Информация о боте со списком команд.</returns>
+    Task<BotInfo> GetMyInfoAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Установить или изменить список команд бота.
+    /// </summary>
+    /// <param name="commands">Список поддерживаемых команд бота (до 32 команд).</param>
+    /// <param name="cancellationToken">Токен отмены операции.</param>
+    /// <returns>Обновлённый список команд бота.</returns>
+    Task<BotCommandsInfo> EditMyCommandsAsync(List<BotCommand> commands, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Установить или изменить список команд бота с помощью объекта <see cref="BotCommandsPatch"/>.
+    /// </summary>
+    /// <param name="patch">Объект с новыми командами бота.</param>
+    /// <param name="cancellationToken">Токен отмены операции.</param>
+    /// <returns>Обновлённый список команд бота.</returns>
+    Task<BotCommandsInfo> EditMyCommandsAsync(BotCommandsPatch patch, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Запустить фоновый long-polling цикл.
@@ -92,13 +130,17 @@ public interface IMaxBotClient : IDisposable
     /// <param name="limit">Максимальное число обновлений за один запрос (1–100).</param>
     /// <param name="timeout">Таймаут long-polling запроса в секундах.</param>
     /// <param name="marker">Начальная позиция в очереди обновлений (null — с последнего).</param>
-    /// <param name="types">Фильтр типов обновлений (null — все).</param>
+    /// <param name="parallelProcessing">
+    /// Выполнять ли обработку каждого обновления в отдельной фоновой задаче (true по умолчанию).
+    /// Предотвращает Head-of-Line Blocking, когда медленная обработка одного события блокирует всю очередь.
+    /// </param>
     void StartPolling(
         Func<Update, IMaxBotClient, Task>? callback = null,
         int? limit = 100,
         int? timeout = 30,
         long? marker = null,
-        List<string>? types = null);
+        List<string>? types = null,
+        bool parallelProcessing = true);
 
     /// <summary>
     /// Отправить принятое обновление всем зарегистрированным обработчикам событий.
@@ -110,6 +152,12 @@ public interface IMaxBotClient : IDisposable
     /// Безопасно вызывать, даже если polling не был запущен.
     /// </summary>
     void StopPolling();
+
+    /// <summary>
+    /// Асинхронно остановить фоновый long-polling цикл с ожиданием завершения текущего запроса к API.
+    /// </summary>
+    /// <param name="cancellationToken">Токен отмены ожидания остановки.</param>
+    Task StopPollingAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Настройки повторных попыток при ошибке «вложение ещё обрабатывается».

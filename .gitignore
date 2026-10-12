@@ -8,3 +8,6 @@ MAX.Bot/obj/*
 .DS_Store
 SaaSoft.MAX.Bot.sln.DotSettings.user
 .temp
+Examples/Releases/*
+*.nupkg
+*.snupkg

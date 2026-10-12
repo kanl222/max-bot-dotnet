@@ -15,6 +15,12 @@ public record AnswerCallbackRequest
     public string CallbackId { get; set; } = string.Empty;
 
     /// <summary>
+    /// Если true, сервер не будет генерировать предпросмотр медиа для ссылок в обновленном тексте сообщения
+    /// </summary>
+    [JsonIgnore]
+    public bool? DisableLinkPreview { get; set; }
+
+    /// <summary>
     /// Новое сообщение, если нужно изменить текущее сообщение
     /// </summary>
     [JsonPropertyName("message")]

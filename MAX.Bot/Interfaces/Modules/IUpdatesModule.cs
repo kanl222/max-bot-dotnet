@@ -57,6 +57,18 @@ public interface IUpdatesModule
     /// <summary>Вызывается при удалении диалога пользователем.</summary>
     event Func<DialogRemovedUpdate, IMaxBotClient, Task>? OnDialogRemoved;
 
+    /// <summary>Вызывается при создании нового комментария к сообщению канала.</summary>
+    event Func<CommentCreatedUpdate, IMaxBotClient, Task>? OnCommentCreated;
+
+    /// <summary>Вызывается при редактировании комментария к сообщению канала.</summary>
+    event Func<CommentEditedUpdate, IMaxBotClient, Task>? OnCommentEdited;
+
+    /// <summary>Вызывается при удалении комментария к сообщению канала.</summary>
+    event Func<CommentRemovedUpdate, IMaxBotClient, Task>? OnCommentRemoved;
+
+    /// <summary>Вызывается при изменении прав администратора у бота в чате или канале.</summary>
+    event Func<BotAdminPermissionsChangedUpdate, IMaxBotClient, Task>? OnBotAdminPermissionsChanged;
+
     /// <summary>
     /// Вызывается при возникновении ошибки во время долгосрочного опроса.
     /// Если обработчик не задан, ошибки игнорируются с паузой между попытками.
@@ -72,13 +84,42 @@ public interface IUpdatesModule
 
     /// <summary>
     /// Долгосрочный опрос обновлений с автоматической отправкой событий подписчикам.
+    /// По умолчанию обработка обновлений выполняется параллельно для предотвращения взаимных блокировок.
     /// </summary>
+    /// <param name="callback">Необязательный дополнительный обработчик каждого входящего обновления.</param>
+    /// <param name="limit">Максимальное число обновлений за один запрос (1–100).</param>
+    /// <param name="timeout">Таймаут long-polling запроса в секундах.</param>
+    /// <param name="marker">Начальная позиция в очереди обновлений (null — с последнего).</param>
+    /// <param name="types">Фильтр типов обновлений (null — все).</param>
+    /// <param name="cancellationToken">Токен отмены операции.</param>
     Task PollUpdatesWithCallback(
         Func<Update, IMaxBotClient, Task>? callback = null,
         int? limit = 100,
         int? timeout = 30,
         long? marker = null,
         List<string>? types = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Долгосрочный опрос обновлений с явным указанием режима параллелизма.
+    /// </summary>
+    /// <param name="callback">Необязательный дополнительный обработчик каждого входящего обновления.</param>
+    /// <param name="limit">Максимальное число обновлений за один запрос (1–100).</param>
+    /// <param name="timeout">Таймаут long-polling запроса в секундах.</param>
+    /// <param name="marker">Начальная позиция в очереди обновлений (null — с последнего).</param>
+    /// <param name="types">Фильтр типов обновлений (null — все).</param>
+    /// <param name="parallelProcessing">
+    /// Выполнять ли обработку каждого обновления в отдельной фоновой задаче (true).
+    /// При значении false обработка выполняется строго последовательно.
+    /// </param>
+    /// <param name="cancellationToken">Токен отмены операции.</param>
+    Task PollUpdatesWithCallback(
+        Func<Update, IMaxBotClient, Task>? callback,
+        int? limit,
+        int? timeout,
+        long? marker,
+        List<string>? types,
+        bool parallelProcessing,
         CancellationToken cancellationToken = default);
 
     /// <summary>

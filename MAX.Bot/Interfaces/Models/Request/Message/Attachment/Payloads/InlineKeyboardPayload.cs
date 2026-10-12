@@ -13,6 +13,7 @@ public sealed class InlineKeyboardPayload : AttachmentPayload
 [JsonDerivedType(typeof(RequestContactButton), "request_contact")]
 [JsonDerivedType(typeof(OpenAppButton), "open_app")]
 [JsonDerivedType(typeof(MessageButton), "message")]
+[JsonDerivedType(typeof(ClipboardButton), "clipboard")]
 public abstract class Button{}
 
 public sealed class CallbackButton : Button
@@ -111,3 +112,21 @@ public sealed class MessageButton : Button
     [JsonPropertyName("text")]
     public string Text { get; set; }
 }
+
+/// <summary>
+/// Кнопка копирования в буфер обмена. При нажатии клиент копирует данные в буфер обмена.
+/// </summary>
+public sealed class ClipboardButton : Button
+{
+    /// <summary>
+    /// Видимый текст кнопки (от 1 до 128 символов).
+    /// </summary>
+    [JsonPropertyName("text")]
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Данные, которые будут скопированы в буфер обмена (до 1024 символов).
+    /// </summary>
+    [JsonPropertyName("payload")]
+    public string Payload { get; set; } = string.Empty;
+}

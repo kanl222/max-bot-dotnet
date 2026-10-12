@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 
 namespace MAX.Bot.Interfaces.Models;
 
@@ -14,10 +14,22 @@ public record MessageBody
     public string? Mid { get; set; }
 
     /// <summary>
+    /// Порядковый номер сообщения в чате
+    /// </summary>
+    [JsonPropertyName("seq")]
+    public long? Seq { get; set; }
+
+    /// <summary>
     /// Новый текст сообщения
     /// </summary>
     [JsonPropertyName("text")]
     public string? Text { get; set; }
+
+    /// <summary>
+    /// Разметка (форматирование) текста сообщения
+    /// </summary>
+    [JsonPropertyName("markup")]
+    public List<Markup.MarkupElement>? Markup { get; set; }
 
     /// <summary>
     /// Вложения сообщения

@@ -148,13 +148,21 @@ public static class MaxBotClientExtensions
         CancellationToken cancellationToken = default)
         => client.Members.GetChatAdminsAsync(chatId, cancellationToken);
 
-    /// <inheritdoc cref="IMembersModule.AddChatAdminsAsync"/>
+    /// <inheritdoc cref="IMembersModule.AddChatAdminsAsync(long, AddChatAdminsRequest, CancellationToken)"/>
     public static Task<BaseResponse> AddChatAdminsAsync(
         this IMaxBotClient client,
         long chatId,
         AddChatAdminsRequest request,
         CancellationToken cancellationToken = default)
         => client.Members.AddChatAdminsAsync(chatId, request, cancellationToken);
+
+    /// <inheritdoc cref="IMembersModule.AddChatAdminsAsync(long, ChatAdminsList, CancellationToken)"/>
+    public static Task<BaseResponse> AddChatAdminsAsync(
+        this IMaxBotClient client,
+        long chatId,
+        ChatAdminsList adminsList,
+        CancellationToken cancellationToken = default)
+        => client.Members.AddChatAdminsAsync(chatId, adminsList, cancellationToken);
 
     /// <inheritdoc cref="IMembersModule.RemoveChatAdminAsync"/>
     public static Task<BaseResponse> RemoveChatAdminAsync(
@@ -179,7 +187,7 @@ public static class MaxBotClientExtensions
         => client.Members.DeleteChatMemberAsync(request, cancellationToken);
 
     /// <inheritdoc cref="IMembersModule.AddChatMemberAsync"/>
-    public static Task<BaseResponse> AddChatMemberAsync(
+    public static Task<ModifyMembersResult> AddChatMemberAsync(
         this IMaxBotClient client,
         AddChatMemberRequest request,
         CancellationToken cancellationToken = default)
@@ -196,6 +204,14 @@ public static class MaxBotClientExtensions
         AttachmentRetryOptions? retryOptions = null,
         CancellationToken cancellationToken = default)
         => client.Attachments.GetVideoAsync(videoToken, retryOptions, cancellationToken);
+
+    /// <inheritdoc cref="IAttachmentsModule.GetVideoDetailsAsync"/>
+    public static Task<VideoAttachmentDetails> GetVideoDetailsAsync(
+        this IMaxBotClient client,
+        string videoToken,
+        AttachmentRetryOptions? retryOptions = null,
+        CancellationToken cancellationToken = default)
+        => client.Attachments.GetVideoDetailsAsync(videoToken, retryOptions, cancellationToken);
 
     /// <inheritdoc cref="IAttachmentsModule.TryGetAttachmentDownloadUrlAsync"/>
     public static Task<string?> TryGetAttachmentDownloadUrlAsync(
@@ -273,6 +289,71 @@ public static class MaxBotClientExtensions
         DeleteSubscriptionRequest request,
         CancellationToken cancellationToken = default)
         => client.Subscriptions.UnsubscribeAsync(request, cancellationToken);
+
+    #endregion
+
+    #region Comments
+
+    /// <inheritdoc cref="ICommentsModule.GetCommentsAsync"/>
+    public static Task<MAX.Bot.Interfaces.Models.Comments.CommentMessageList> GetCommentsAsync(
+        this IMaxBotClient client,
+        MAX.Bot.Interfaces.Models.Request.GetCommentsRequest request,
+        CancellationToken cancellationToken = default)
+        => client.Comments.GetCommentsAsync(request, cancellationToken);
+
+    /// <inheritdoc cref="ICommentsModule.GetCommentByIdAsync"/>
+    public static Task<MAX.Bot.Interfaces.Models.Comments.CommentMessage> GetCommentByIdAsync(
+        this IMaxBotClient client,
+        string messageId,
+        string commentId,
+        CancellationToken cancellationToken = default)
+        => client.Comments.GetCommentByIdAsync(messageId, commentId, cancellationToken);
+
+    /// <inheritdoc cref="ICommentsModule.SendCommentAsync(MAX.Bot.Interfaces.Models.Request.SendCommentRequest, CancellationToken)"/>
+    public static Task<MAX.Bot.Interfaces.Models.Comments.SendCommentResult> SendCommentAsync(
+        this IMaxBotClient client,
+        MAX.Bot.Interfaces.Models.Request.SendCommentRequest request,
+        CancellationToken cancellationToken = default)
+        => client.Comments.SendCommentAsync(request, cancellationToken);
+
+    /// <inheritdoc cref="ICommentsModule.SendCommentAsync(string, string, CancellationToken)"/>
+    public static Task<MAX.Bot.Interfaces.Models.Comments.SendCommentResult> SendCommentAsync(
+        this IMaxBotClient client,
+        string messageId,
+        string text,
+        CancellationToken cancellationToken = default)
+        => client.Comments.SendCommentAsync(messageId, text, cancellationToken);
+
+    /// <inheritdoc cref="ICommentsModule.EditCommentAsync(MAX.Bot.Interfaces.Models.Request.EditCommentRequest, CancellationToken)"/>
+    public static Task<BaseResponse> EditCommentAsync(
+        this IMaxBotClient client,
+        MAX.Bot.Interfaces.Models.Request.EditCommentRequest request,
+        CancellationToken cancellationToken = default)
+        => client.Comments.EditCommentAsync(request, cancellationToken);
+
+    /// <inheritdoc cref="ICommentsModule.EditCommentAsync(string, string, string, CancellationToken)"/>
+    public static Task<BaseResponse> EditCommentAsync(
+        this IMaxBotClient client,
+        string messageId,
+        string commentId,
+        string text,
+        CancellationToken cancellationToken = default)
+        => client.Comments.EditCommentAsync(messageId, commentId, text, cancellationToken);
+
+    /// <inheritdoc cref="ICommentsModule.DeleteCommentAsync(MAX.Bot.Interfaces.Models.Request.DeleteCommentRequest, CancellationToken)"/>
+    public static Task<BaseResponse> DeleteCommentAsync(
+        this IMaxBotClient client,
+        MAX.Bot.Interfaces.Models.Request.DeleteCommentRequest request,
+        CancellationToken cancellationToken = default)
+        => client.Comments.DeleteCommentAsync(request, cancellationToken);
+
+    /// <inheritdoc cref="ICommentsModule.DeleteCommentAsync(string, string, CancellationToken)"/>
+    public static Task<BaseResponse> DeleteCommentAsync(
+        this IMaxBotClient client,
+        string messageId,
+        string commentId,
+        CancellationToken cancellationToken = default)
+        => client.Comments.DeleteCommentAsync(messageId, commentId, cancellationToken);
 
     #endregion
 }

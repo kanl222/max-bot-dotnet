@@ -1,15 +1,16 @@
 using System.Net;
 using MAX.Bot.Exceptions;
+using MAX.Bot.Interfaces;
 using MAX.Bot.Interfaces.Models.Attachment;
 using static MAX.Bot.FrameworkSpecificMethods;
 
 namespace MAX.Bot;
 
 /// <summary>
-/// Внутренний HTTP-слой, разделяемый всеми модулями.
-/// Не предназначен для прямого использования — используйте <see cref="MaxBotClient"/>.
+/// Реализация сетевого HTTP-транспорта по умолчанию для API мессенджера MAX.
+/// Реализует <see cref="IMaxApiTransport"/>. Не предназначен для прямого использования снаружи библиотеки.
 /// </summary>
-internal sealed class MaxBotCore : IDisposable
+internal sealed class MaxBotCore : IMaxApiTransport
 {
     internal static readonly JsonSerializerOptions DeserializeOptions = new()
     {
@@ -29,16 +30,26 @@ internal sealed class MaxBotCore : IDisposable
     /// <summary>Задержка по умолчанию при HTTP 429, если нет Retry-After.</summary>
     private static readonly TimeSpan DefaultRateLimitDelay = TimeSpan.FromSeconds(1);
 
+    /// <summary>Максимально допустимая задержка из заголовка Retry-After для защиты от DoS.</summary>
+    private static readonly TimeSpan MaxRetryAfterDelay = TimeSpan.FromSeconds(60);
+
     internal readonly HttpClient HttpClient;
-    internal readonly AttachmentRetryOptions AttachmentRetryOptions;
     internal readonly bool OwnsHttpClient;
+
+    /// <inheritdoc/>
+    public Uri BaseAddress => HttpClient.BaseAddress ?? new Uri(MaxBotClient.BaseUrl);
+
+    /// <inheritdoc/>
+    public AttachmentRetryOptions AttachmentRetryOptions { get; }
 
     private bool _disposed;
 
     /// <summary>
     /// Конструктор с внешним <see cref="System.Net.Http.HttpClient"/> (DI).
-    /// Не мутирует переданный клиент — BaseAddress и заголовки должны быть настроены снаружи.
     /// </summary>
+    /// <param name="token">Токен бота для аутентификации в API MAX.</param>
+    /// <param name="httpClient">Экземпляр HTTP-клиента из IHttpClientFactory.</param>
+    /// <param name="attachmentRetryOptions">Настройки повторов для вложений.</param>
     internal MaxBotCore(
         string token,
         HttpClient httpClient,
@@ -47,8 +58,6 @@ internal sealed class MaxBotCore : IDisposable
         HttpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         OwnsHttpClient = false;
 
-        // Не перезаписываем BaseAddress и заголовки — они уже настроены через IHttpClientFactory.
-        // Если BaseAddress не задан — устанавливаем дефолт.
         HttpClient.BaseAddress ??= new Uri(MaxBotClient.BaseUrl);
 
         if (!HttpClient.DefaultRequestHeaders.Contains("Authorization"))
@@ -60,6 +69,9 @@ internal sealed class MaxBotCore : IDisposable
     /// <summary>
     /// Конструктор со встроенным <see cref="System.Net.Http.HttpClient"/>.
     /// </summary>
+    /// <param name="token">Токен бота для аутентификации в API MAX.</param>
+    /// <param name="timeoutSeconds">Таймаут выполнения сетевых запросов в секундах.</param>
+    /// <param name="attachmentRetryOptions">Настройки повторов для вложений.</param>
     internal MaxBotCore(
         string token,
         int timeoutSeconds,
@@ -77,7 +89,8 @@ internal sealed class MaxBotCore : IDisposable
         AttachmentRetryOptions = attachmentRetryOptions ?? new AttachmentRetryOptions();
     }
 
-    internal async Task<T> SendRequestAsync<T>(
+    /// <inheritdoc/>
+    public async Task<T> SendRequestAsync<T>(
         HttpMethod method,
         string endpoint,
         object? data = null,
@@ -94,21 +107,24 @@ internal sealed class MaxBotCore : IDisposable
                 request.Content = new StringContent(json, Encoding.UTF8, "application/json");
             }
 
-            using var response = await HttpClient.SendAsync(request, cancellationToken);
-            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var response = await HttpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
             // Rate Limiting: автоматически ждём и повторяем при HTTP 429
             if (response.StatusCode == (HttpStatusCode)429 && rateLimitAttempt < MaxRateLimitRetries)
             {
                 var retryAfter = response.Headers.RetryAfter?.Delta ?? DefaultRateLimitDelay;
-                await Task.Delay(retryAfter, cancellationToken);
+                if (retryAfter > MaxRetryAfterDelay)
+                    throw new MaxBotClientException($"Сервер запросил недопустимо длительную задержку Retry-After: {retryAfter.TotalSeconds}с", response.StatusCode);
+
+                await Task.Delay(retryAfter, cancellationToken).ConfigureAwait(false);
                 continue;
             }
 
             if (!response.IsSuccessStatusCode)
             {
                 throw new MaxBotClientException(
-                    $"HTTP {response.StatusCode}: {responseContent}: {request.Method} {request.RequestUri} {request.Content?.ReadAsStringAsync(cancellationToken).Result}",
+                    $"HTTP {response.StatusCode}: {responseContent}: {request.Method} {request.RequestUri}",
                     response.StatusCode);
             }
 
@@ -117,7 +133,8 @@ internal sealed class MaxBotCore : IDisposable
         }
     }
 
-    internal async Task<T> RetryWhileAttachmentNotReadyAsync<T>(
+    /// <inheritdoc/>
+    public async Task<T> RetryWhileAttachmentNotReadyAsync<T>(
         Func<Task<T>> action,
         AttachmentRetryOptions? retryOptions,
         CancellationToken cancellationToken)
@@ -129,15 +146,37 @@ internal sealed class MaxBotCore : IDisposable
         {
             try
             {
-                return await action();
+                return await action().ConfigureAwait(false);
             }
             catch (MaxBotClientException ex) when (ex.IsAttachmentNotReady && attempt < maxAttempts - 1)
             {
-                await Task.Delay(options.RetryDelay, cancellationToken);
+                await Task.Delay(options.RetryDelay, cancellationToken).ConfigureAwait(false);
             }
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<HttpResponseMessage> PostMultipartAsync(
+        Uri uploadUri,
+        HttpContent content,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException_ThrowIfNull(uploadUri);
+        ArgumentNullException_ThrowIfNull(content);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, uploadUri)
+        {
+            Content = content
+        };
+
+        return await HttpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Формирует строку URL-параметров запроса из словаря ключ-значение.
+    /// </summary>
+    /// <param name="queryParams">Словарь query-параметров.</param>
+    /// <returns>Строка query-параметров, начинающаяся с '?', либо пустая строка.</returns>
     internal static string BuildQueryString(Dictionary<string, string> queryParams)
     {
         if (queryParams.Count == 0)
@@ -146,6 +185,9 @@ internal sealed class MaxBotCore : IDisposable
         return "?" + string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={HttpUtility_UrlEncode(kvp.Value)}"));
     }
 
+    /// <summary>
+    /// Освобождает ресурсы сетевого клиента.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed) return;

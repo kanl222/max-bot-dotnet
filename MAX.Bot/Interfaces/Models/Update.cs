@@ -106,6 +106,26 @@ public static class UpdateTypes
     public const string UserRemoved = "user_removed";
 
     /// <summary>
+    /// Создание нового комментария к сообщению канала
+    /// </summary>
+    public const string CommentCreated = "comment_created";
+
+    /// <summary>
+    /// Редактирование комментария к сообщению канала
+    /// </summary>
+    public const string CommentEdited = "comment_edited";
+
+    /// <summary>
+    /// Удаление комментария к сообщению канала
+    /// </summary>
+    public const string CommentRemoved = "comment_removed";
+
+    /// <summary>
+    /// Изменение прав администратора у бота в чате или канале
+    /// </summary>
+    public const string BotAdminPermissionsChanged = "bot_admin_permissions_changed";
+
+    /// <summary>
     /// Устаревшее имя константы. Используйте <see cref="MessageRemoved"/>.
     /// </summary>
     [Obsolete("Use MessageRemoved.")]

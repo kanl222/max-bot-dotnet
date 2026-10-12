@@ -11,9 +11,9 @@ namespace MAX.Bot.Modules;
 
 internal sealed class MessagesModule : IMessagesModule
 {
-    private readonly MaxBotCore _core;
+    private readonly IMaxApiTransport _core;
 
-    internal MessagesModule(MaxBotCore core) => _core = core;
+    internal MessagesModule(IMaxApiTransport core) => _core = core;
 
     public async Task<SendMessageResponse> SendMessageAsync(
         SendMessageRequest request,
@@ -37,9 +37,9 @@ internal sealed class MessagesModule : IMessagesModule
             HttpMethod.Post, $"/messages{queryString}", request, cancellationToken);
 
         if (RequiresAttachmentRetry(request))
-            return await _core.RetryWhileAttachmentNotReadyAsync(send, retryOptions, cancellationToken);
+            return await _core.RetryWhileAttachmentNotReadyAsync(send, retryOptions, cancellationToken).ConfigureAwait(false);
 
-        return await send();
+        return await send().ConfigureAwait(false);
     }
 
     private static bool RequiresAttachmentRetry(SendMessageRequest request) =>
@@ -52,11 +52,21 @@ internal sealed class MessagesModule : IMessagesModule
         ArgumentNullException_ThrowIfNull(request);
         request.Validate();
 
+        var queryParams = new Dictionary<string, string>
+        {
+            ["callback_id"] = request.CallbackId
+        };
+
+        if (request.DisableLinkPreview.HasValue)
+            queryParams["disable_link_preview"] = request.DisableLinkPreview.Value.ToString().ToLower();
+
+        var queryString = MaxBotCore.BuildQueryString(queryParams);
+
         return await _core.SendRequestAsync<BaseResponse>(
             HttpMethod.Post,
-            $"/answers?callback_id={HttpUtility_UrlEncode(request.CallbackId)}",
+            $"/answers{queryString}",
             request,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<GetMessagesResponse> GetMessagesAsync(
@@ -77,6 +87,12 @@ internal sealed class MessagesModule : IMessagesModule
         if (request.Count.HasValue)
             queryParams["count"] = request.Count.Value.ToString();
 
+        if (request.Before.HasValue)
+            queryParams["before"] = request.Before.Value.ToString();
+
+        if (request.After.HasValue)
+            queryParams["after"] = request.After.Value.ToString();
+
         if (request.From.HasValue)
             queryParams["from"] = request.From.Value.ToString();
 
@@ -86,7 +102,7 @@ internal sealed class MessagesModule : IMessagesModule
         var queryString = MaxBotCore.BuildQueryString(queryParams);
 
         return await _core.SendRequestAsync<GetMessagesResponse>(
-            HttpMethod.Get, $"/messages{queryString}", null, cancellationToken);
+            HttpMethod.Get, $"/messages{queryString}", null, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<Message> GetMessageByIdAsync(
@@ -97,7 +113,7 @@ internal sealed class MessagesModule : IMessagesModule
             throw new ArgumentException("ID сообщения не должен быть пустым.", nameof(messageId));
 
         return await _core.SendRequestAsync<Message>(
-            HttpMethod.Get, $"/messages/{HttpUtility_UrlEncode(messageId)}", null, cancellationToken);
+            HttpMethod.Get, $"/messages/{HttpUtility_UrlEncode(messageId)}", null, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<BaseResponse> EditMessageByIdAsync(
@@ -113,9 +129,9 @@ internal sealed class MessagesModule : IMessagesModule
             HttpMethod.Put, $"/messages?message_id={HttpUtility_UrlEncode(messageId)}", messageRequest, cancellationToken);
 
         if (RequiresAttachmentRetry(messageRequest))
-            return await _core.RetryWhileAttachmentNotReadyAsync(edit, retryOptions, cancellationToken);
+            return await _core.RetryWhileAttachmentNotReadyAsync(edit, retryOptions, cancellationToken).ConfigureAwait(false);
 
-        return await edit();
+        return await edit().ConfigureAwait(false);
     }
 
     public async Task<BaseResponse> DeleteMessageByIdAsync(
@@ -126,6 +142,6 @@ internal sealed class MessagesModule : IMessagesModule
             throw new ArgumentException("ID сообщения не должен быть пустым.", nameof(messageId));
 
         return await _core.SendRequestAsync<BaseResponse>(
-            HttpMethod.Delete, $"/messages?message_id={HttpUtility_UrlEncode(messageId)}", null, cancellationToken);
+            HttpMethod.Delete, $"/messages?message_id={HttpUtility_UrlEncode(messageId)}", null, cancellationToken).ConfigureAwait(false);
     }
 }

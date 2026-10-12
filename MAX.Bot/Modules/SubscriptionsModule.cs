@@ -7,14 +7,14 @@ namespace MAX.Bot.Modules;
 
 internal sealed class SubscriptionsModule : ISubscriptionsModule
 {
-    private readonly MaxBotCore _core;
+    private readonly IMaxApiTransport _core;
 
-    internal SubscriptionsModule(MaxBotCore core) => _core = core;
+    internal SubscriptionsModule(IMaxApiTransport core) => _core = core;
 
     public async Task<GetSubscriptionsResponse> GetSubscriptionsAsync(
         CancellationToken cancellationToken = default)
         => await _core.SendRequestAsync<GetSubscriptionsResponse>(
-            HttpMethod.Get, "/subscriptions", null, cancellationToken);
+            HttpMethod.Get, "/subscriptions", null, cancellationToken).ConfigureAwait(false);
 
     public async Task<BaseResponse> SubscribeAsync(
         SubscriptionRequest request,
@@ -24,7 +24,7 @@ internal sealed class SubscriptionsModule : ISubscriptionsModule
         request.Validate();
 
         return await _core.SendRequestAsync<BaseResponse>(
-            HttpMethod.Post, "/subscriptions", request, cancellationToken);
+            HttpMethod.Post, "/subscriptions", request, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<BaseResponse> UnsubscribeAsync(
@@ -38,6 +38,6 @@ internal sealed class SubscriptionsModule : ISubscriptionsModule
             HttpMethod.Delete,
             $"/subscriptions?url={HttpUtility_UrlEncode(request.Url)}",
             null,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 }

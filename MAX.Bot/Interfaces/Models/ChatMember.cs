@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 
 namespace MAX.Bot.Interfaces.Models;
 
@@ -160,4 +160,16 @@ public static class ChatAdminPermission
     /// Удалять сообщения
     /// </summary>
     public const string DeleteMessage = "delete_message";
+    /// <summary>
+    /// Редактировать сообщения (OpenAPI v0.0.33)
+    /// </summary>
+    public const string Edit = "edit";
+    /// <summary>
+    /// Удалять сообщения (OpenAPI v0.0.33)
+    /// </summary>
+    public const string Delete = "delete";
+    /// <summary>
+    /// Просматривать статистику чата/канала (OpenAPI v0.0.33)
+    /// </summary>
+    public const string ViewStats = "view_stats";
 }

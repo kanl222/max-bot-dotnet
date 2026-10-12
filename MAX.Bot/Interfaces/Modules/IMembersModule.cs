@@ -33,6 +33,14 @@ public interface IMembersModule
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Назначить администраторов группового чата (согласно схеме ChatAdminsList в OpenAPI).
+    /// </summary>
+    Task<BaseResponse> AddChatAdminsAsync(
+        long chatId,
+        ChatAdminsList adminsList,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Отменить права администратора в групповом чате.
     /// </summary>
     Task<BaseResponse> RemoveChatAdminAsync(
@@ -55,9 +63,9 @@ public interface IMembersModule
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Добавить участника в чат.
+    /// Добавить участника в чат. Возвращает подробный результат добавления участников.
     /// </summary>
-    Task<BaseResponse> AddChatMemberAsync(
+    Task<ModifyMembersResult> AddChatMemberAsync(
         AddChatMemberRequest request,
         CancellationToken cancellationToken = default);
 }

@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 
 namespace MAX.Bot.Interfaces.Models.Request;
 
@@ -22,13 +22,27 @@ public record GetMessagesRequest
     public List<string>? MessageIds { get; set; }
 
     /// <summary>
-    /// Время начала для запрашиваемых сообщений (в формате Unix timestamp)
+    /// Сообщения до указанной временной метки (в формате Unix timestamp)
+    /// </summary>
+    [JsonPropertyName("before")]
+    public long? Before { get; set; }
+
+    /// <summary>
+    /// Сообщения после указанной временной метки (в формате Unix timestamp)
+    /// </summary>
+    [JsonPropertyName("after")]
+    public long? After { get; set; }
+
+    /// <summary>
+    /// Время начала для запрашиваемых сообщений (в формате Unix timestamp).
+    /// Устарело: используйте <see cref="After"/>.
     /// </summary>
     [JsonPropertyName("from")]
     public long? From { get; set; }
 
     /// <summary>
-    /// Время окончания для запрашиваемых сообщений (в формате Unix timestamp)
+    /// Время окончания для запрашиваемых сообщений (в формате Unix timestamp).
+    /// Устарело: используйте <see cref="Before"/>.
     /// </summary>
     [JsonPropertyName("to")]
     public long? To { get; set; }
@@ -59,5 +73,8 @@ public record GetMessagesRequest
 
         if (From.HasValue && To.HasValue && From.Value > To.Value)
             throw new ArgumentException("from не должен быть больше to.");
+
+        if (After.HasValue && Before.HasValue && After.Value > Before.Value)
+            throw new ArgumentException("after не должен быть больше before.");
     }
 }

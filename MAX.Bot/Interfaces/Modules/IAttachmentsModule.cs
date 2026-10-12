@@ -20,6 +20,15 @@ public interface IAttachmentsModule
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Получить подробную информацию о видео-вложении по его токену (согласно схеме VideoAttachmentDetails в OpenAPI).
+    /// Автоматически повторяет запрос, если видео ещё обрабатывается.
+    /// </summary>
+    Task<VideoAttachmentDetails> GetVideoDetailsAsync(
+        string videoToken,
+        AttachmentRetryOptions? retryOptions = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Возвращает URL для скачивания вложения или null, если оно ещё не готово.
     /// </summary>
     Task<string?> TryGetAttachmentDownloadUrlAsync(

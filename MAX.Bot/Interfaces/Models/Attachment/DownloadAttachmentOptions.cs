@@ -21,4 +21,16 @@ public class DownloadAttachmentOptions : AttachmentRetryOptions
     /// Расширение файла по умолчанию, если его не удалось определить из имени или URL.
     /// </summary>
     public string? DefaultExtension { get; set; }
+
+    /// <summary>
+    /// Максимальный размер вложения (в байтах) для скачивания в оперативную память, если <see cref="FilePath"/> не задан.
+    /// По умолчанию — 50 МБ (52 428 800 байт). Предотвращает исчерпание оперативной памяти (OOM DoS).
+    /// </summary>
+    public long MaxInMemorySizeBytes { get; set; } = 50L * 1024 * 1024;
+
+    /// <summary>
+    /// Таймаут на операцию скачивания и чтение потока данных. По умолчанию — 60 секунд.
+    /// Предотвращает зависание при медленной или зависшей передаче данных сервером.
+    /// </summary>
+    public TimeSpan DownloadTimeout { get; set; } = TimeSpan.FromSeconds(60);
 }

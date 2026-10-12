@@ -37,4 +37,16 @@ public record Message
     /// </summary>
     [JsonPropertyName("url")]
     public string? Url { get; set; }
+
+    /// <summary>
+    /// Пересланное или ответное сообщение
+    /// </summary>
+    [JsonPropertyName("link")]
+    public LinkedMessage? Link { get; set; }
+
+    /// <summary>
+    /// Статистика сообщения (доступна для каналов в методе получения сообщений)
+    /// </summary>
+    [JsonPropertyName("stat")]
+    public MessageStat? Stat { get; set; }
 }

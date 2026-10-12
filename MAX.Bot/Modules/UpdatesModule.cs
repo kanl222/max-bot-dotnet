@@ -8,10 +8,10 @@ namespace MAX.Bot.Modules;
 
 internal sealed class UpdatesModule : IUpdatesModule
 {
-    private readonly MaxBotCore _core;
+    private readonly IMaxApiTransport _core;
     private readonly IMaxBotClient _client;
 
-    internal UpdatesModule(MaxBotCore core, IMaxBotClient client)
+    internal UpdatesModule(IMaxApiTransport core, IMaxBotClient client)
     {
         _core = core;
         _client = client;
@@ -33,6 +33,10 @@ internal sealed class UpdatesModule : IUpdatesModule
     public event Func<DialogMutedUpdate, IMaxBotClient, Task>? OnDialogMuted;
     public event Func<DialogUnmutedUpdate, IMaxBotClient, Task>? OnDialogUnmuted;
     public event Func<DialogRemovedUpdate, IMaxBotClient, Task>? OnDialogRemoved;
+    public event Func<CommentCreatedUpdate, IMaxBotClient, Task>? OnCommentCreated;
+    public event Func<CommentEditedUpdate, IMaxBotClient, Task>? OnCommentEdited;
+    public event Func<CommentRemovedUpdate, IMaxBotClient, Task>? OnCommentRemoved;
+    public event Func<BotAdminPermissionsChangedUpdate, IMaxBotClient, Task>? OnBotAdminPermissionsChanged;
     public event Func<Exception, Task>? OnPollingError;
 
     public async Task<GetUpdatesResponse> GetUpdatesAsync(
@@ -56,15 +60,25 @@ internal sealed class UpdatesModule : IUpdatesModule
         var queryString = MaxBotCore.BuildQueryString(queryParams);
 
         return await _core.SendRequestAsync<GetUpdatesResponse>(
-            HttpMethod.Get, $"/updates{queryString}", null, cancellationToken);
+            HttpMethod.Get, $"/updates{queryString}", null, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task PollUpdatesWithCallback(
+    public Task PollUpdatesWithCallback(
         Func<Update, IMaxBotClient, Task>? callback = null,
         int? limit = 100,
         int? timeout = 30,
         long? marker = null,
         List<string>? types = null,
+        CancellationToken cancellationToken = default)
+        => PollUpdatesWithCallback(callback, limit, timeout, marker, types, parallelProcessing: true, cancellationToken);
+
+    public async Task PollUpdatesWithCallback(
+        Func<Update, IMaxBotClient, Task>? callback,
+        int? limit,
+        int? timeout,
+        long? marker,
+        List<string>? types,
+        bool parallelProcessing,
         CancellationToken cancellationToken = default)
     {
         long? currentMarker = marker;
@@ -81,16 +95,21 @@ internal sealed class UpdatesModule : IUpdatesModule
                     Timeout = timeout,
                     Marker = currentMarker,
                     Types = types
-                }, cancellationToken);
+                }, cancellationToken).ConfigureAwait(false);
 
                 consecutiveErrors = 0; // Сбрасываем счётчик при успешном запросе
 
                 foreach (var update in response.Updates)
                 {
-                    await DispatchUpdateAsync(update);
-
-                    if (callback != null)
-                        await callback.Invoke(update, _client);
+                    if (parallelProcessing)
+                    {
+                        // Неблокирующая параллельная обработка: медленный обработчик не подвешивает опрос очереди
+                        _ = ProcessUpdateAsync(update, callback, cancellationToken);
+                    }
+                    else
+                    {
+                        await ProcessUpdateAsync(update, callback, cancellationToken).ConfigureAwait(false);
+                    }
                 }
 
                 currentMarker = response.Marker;
@@ -107,7 +126,7 @@ internal sealed class UpdatesModule : IUpdatesModule
                 {
                     try
                     {
-                        await InvokeErrorAsync(OnPollingError, ex);
+                        await InvokeErrorAsync(OnPollingError, ex).ConfigureAwait(false);
                     }
                     catch
                     {
@@ -115,65 +134,110 @@ internal sealed class UpdatesModule : IUpdatesModule
                     }
                 }
 
-                // Экспоненциальная задержка с джиттером
-                var delay = Math.Min(1000 * Math.Pow(2, consecutiveErrors - 1), 60000); // от 1с до 1мин
-                var jitter = random.Next(0, 1000); // добавляем случайную задержку до 1с
-                await Task.Delay((int)delay + jitter, cancellationToken);
+                // Экспоненциальная задержка с джиттером (максимум 5 секунд вместо 60 для быстрого восстановления)
+                var delay = Math.Min(1000 * Math.Pow(1.5, consecutiveErrors - 1), 5000);
+                var jitter = random.Next(0, 500);
+                await Task.Delay((int)delay + jitter, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
 
+    private async Task ProcessUpdateAsync(
+        Update update,
+        Func<Update, IMaxBotClient, Task>? callback,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await DispatchUpdateAsync(update).ConfigureAwait(false);
+
+            if (callback != null)
+                await callback.Invoke(update, _client).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Штатная отмена
+        }
+        catch (Exception ex)
+        {
+            // Изоляция ошибок в пользовательских обработчиках событий (защита от Poison Pill DoS).
+            // Ошибка в обработке одного сообщения не должна останавливать цикл и блокировать продвижение маркера.
+            if (OnPollingError != null)
+            {
+                try
+                {
+                    await InvokeErrorAsync(OnPollingError, ex).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Игнорируем исключения внутри пользовательского обработчика ошибок
+                }
             }
         }
     }
 
     public async Task DispatchUpdateAsync(Update update)
     {
-        await InvokeAsync(OnUpdate, update, _client);
+        await InvokeAsync(OnUpdate, update, _client).ConfigureAwait(false);
 
         switch (update)
         {
             case MessageCreatedUpdate messageCreated:
-                await InvokeAsync(OnMessageCreated, messageCreated, _client);
+                await InvokeAsync(OnMessageCreated, messageCreated, _client).ConfigureAwait(false);
                 break;
             case MessageEditedUpdate messageEdited:
-                await InvokeAsync(OnMessageEdited, messageEdited, _client);
+                await InvokeAsync(OnMessageEdited, messageEdited, _client).ConfigureAwait(false);
                 break;
             case MessageRemovedUpdate messageRemoved:
-                await InvokeAsync(OnMessageRemoved, messageRemoved, _client);
+                await InvokeAsync(OnMessageRemoved, messageRemoved, _client).ConfigureAwait(false);
                 break;
             case MessageCallbackUpdate messageCallback:
-                await InvokeAsync(OnMessageCallback, messageCallback, _client);
+                await InvokeAsync(OnMessageCallback, messageCallback, _client).ConfigureAwait(false);
                 break;
             case BotAddedToChatUpdate botAdded:
-                await InvokeAsync(OnBotAddedToChat, botAdded, _client);
+                await InvokeAsync(OnBotAddedToChat, botAdded, _client).ConfigureAwait(false);
                 break;
             case BotStartedUpdate botStarted:
-                await InvokeAsync(OnBotStarted, botStarted, _client);
+                await InvokeAsync(OnBotStarted, botStarted, _client).ConfigureAwait(false);
                 break;
             case BotStoppedUpdate botStopped:
-                await InvokeAsync(OnBotStopped, botStopped, _client);
+                await InvokeAsync(OnBotStopped, botStopped, _client).ConfigureAwait(false);
                 break;
             case BotRemovedFromChatUpdate botRemoved:
-                await InvokeAsync(OnBotRemovedFromChat, botRemoved, _client);
+                await InvokeAsync(OnBotRemovedFromChat, botRemoved, _client).ConfigureAwait(false);
                 break;
             case ChatTitleChangedUpdate titleChanged:
-                await InvokeAsync(OnChatTitleChanged, titleChanged, _client);
+                await InvokeAsync(OnChatTitleChanged, titleChanged, _client).ConfigureAwait(false);
                 break;
             case UserAddedToChatUpdate userAdded:
-                await InvokeAsync(OnUserAddedToChat, userAdded, _client);
+                await InvokeAsync(OnUserAddedToChat, userAdded, _client).ConfigureAwait(false);
                 break;
             case UserRemovedFromChatUpdate userRemoved:
-                await InvokeAsync(OnUserRemovedFromChat, userRemoved, _client);
+                await InvokeAsync(OnUserRemovedFromChat, userRemoved, _client).ConfigureAwait(false);
                 break;
             case DialogClearedUpdate dialogCleared:
-                await InvokeAsync(OnDialogCleared, dialogCleared, _client);
+                await InvokeAsync(OnDialogCleared, dialogCleared, _client).ConfigureAwait(false);
                 break;
             case DialogMutedUpdate dialogMuted:
-                await InvokeAsync(OnDialogMuted, dialogMuted, _client);
+                await InvokeAsync(OnDialogMuted, dialogMuted, _client).ConfigureAwait(false);
                 break;
             case DialogUnmutedUpdate dialogUnmuted:
-                await InvokeAsync(OnDialogUnmuted, dialogUnmuted, _client);
+                await InvokeAsync(OnDialogUnmuted, dialogUnmuted, _client).ConfigureAwait(false);
                 break;
             case DialogRemovedUpdate dialogRemoved:
-                await InvokeAsync(OnDialogRemoved, dialogRemoved, _client);
+                await InvokeAsync(OnDialogRemoved, dialogRemoved, _client).ConfigureAwait(false);
+                break;
+            case CommentCreatedUpdate commentCreated:
+                await InvokeAsync(OnCommentCreated, commentCreated, _client).ConfigureAwait(false);
+                break;
+            case CommentEditedUpdate commentEdited:
+                await InvokeAsync(OnCommentEdited, commentEdited, _client).ConfigureAwait(false);
+                break;
+            case CommentRemovedUpdate commentRemoved:
+                await InvokeAsync(OnCommentRemoved, commentRemoved, _client).ConfigureAwait(false);
+                break;
+            case BotAdminPermissionsChangedUpdate botAdminPermissionsChanged:
+                await InvokeAsync(OnBotAdminPermissionsChanged, botAdminPermissionsChanged, _client).ConfigureAwait(false);
                 break;
         }
     }

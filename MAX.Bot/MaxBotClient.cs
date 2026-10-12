@@ -2,6 +2,7 @@ using MAX.Bot.Interfaces;
 using MAX.Bot.Interfaces.Models;
 using MAX.Bot.Interfaces.Models.Attachment;
 using MAX.Bot.Modules;
+using static MAX.Bot.FrameworkSpecificMethods;
 
 namespace MAX.Bot;
 
@@ -14,29 +15,32 @@ public class MaxBotClient : IMaxBotClient, IDisposable
     /// <summary>Базовый URL API MAX Bot.</summary>
     public const string BaseUrl = "https://platform-api2.max.ru";
 
-    private readonly MaxBotCore _core;
+    private readonly IMaxApiTransport _transport;
     private readonly object _pollLock = new();
     private CancellationTokenSource? _pollCts;
     private Task? _pollTask;
     private bool _disposed;
 
     /// <inheritdoc/>
-    public IMessagesModule Messages { get; private set; }
+    public IMessagesModule Messages { get; private set; } = null!;
 
     /// <inheritdoc/>
-    public IChatsModule Chats { get; private set; }
+    public IChatsModule Chats { get; private set; } = null!;
 
     /// <inheritdoc/>
-    public IMembersModule Members { get; private set; }
+    public IMembersModule Members { get; private set; } = null!;
 
     /// <inheritdoc/>
-    public IAttachmentsModule Attachments { get; private set; }
+    public IAttachmentsModule Attachments { get; private set; } = null!;
 
     /// <inheritdoc/>
-    public IUpdatesModule Updates { get; private set; }
+    public IUpdatesModule Updates { get; private set; } = null!;
 
     /// <inheritdoc/>
-    public ISubscriptionsModule Subscriptions { get; private set; }
+    public ISubscriptionsModule Subscriptions { get; private set; } = null!;
+
+    /// <inheritdoc/>
+    public ICommentsModule Comments { get; private set; } = null!;
 
     /// <inheritdoc/>
     public event Func<Update, IMaxBotClient, Task>? OnUpdate
@@ -151,6 +155,34 @@ public class MaxBotClient : IMaxBotClient, IDisposable
     }
 
     /// <inheritdoc/>
+    public event Func<CommentCreatedUpdate, IMaxBotClient, Task>? OnCommentCreated
+    {
+        add => Updates.OnCommentCreated += value;
+        remove => Updates.OnCommentCreated -= value;
+    }
+
+    /// <inheritdoc/>
+    public event Func<CommentEditedUpdate, IMaxBotClient, Task>? OnCommentEdited
+    {
+        add => Updates.OnCommentEdited += value;
+        remove => Updates.OnCommentEdited -= value;
+    }
+
+    /// <inheritdoc/>
+    public event Func<CommentRemovedUpdate, IMaxBotClient, Task>? OnCommentRemoved
+    {
+        add => Updates.OnCommentRemoved += value;
+        remove => Updates.OnCommentRemoved -= value;
+    }
+
+    /// <inheritdoc/>
+    public event Func<BotAdminPermissionsChangedUpdate, IMaxBotClient, Task>? OnBotAdminPermissionsChanged
+    {
+        add => Updates.OnBotAdminPermissionsChanged += value;
+        remove => Updates.OnBotAdminPermissionsChanged -= value;
+    }
+
+    /// <inheritdoc/>
     public event Func<Exception, Task>? OnPollingError
     {
         add => Updates.OnPollingError += value;
@@ -158,7 +190,18 @@ public class MaxBotClient : IMaxBotClient, IDisposable
     }
 
     /// <inheritdoc/>
-    public AttachmentRetryOptions AttachmentRetryOptions => _core.AttachmentRetryOptions;
+    public AttachmentRetryOptions AttachmentRetryOptions => _transport.AttachmentRetryOptions;
+
+    /// <summary>
+    /// Создать клиента с пользовательской реализацией сетевого транспорта <see cref="IMaxApiTransport"/>.
+    /// Позволяет подменять сетевой слой для мок-тестирования или внедрения интерцепторов/логгеров.
+    /// </summary>
+    /// <param name="transport">Реализация сетевого транспорта API MAX.</param>
+    public MaxBotClient(IMaxApiTransport transport)
+    {
+        _transport = transport ?? throw new ArgumentNullException(nameof(transport));
+        InitModules();
+    }
 
     /// <summary>
     /// Создать клиента с внешним <see cref="HttpClient"/> (рекомендуется при использовании DI).
@@ -167,9 +210,8 @@ public class MaxBotClient : IMaxBotClient, IDisposable
         string token,
         HttpClient httpClient,
         AttachmentRetryOptions? attachmentRetryOptions = null)
+        : this(new MaxBotCore(token, httpClient, attachmentRetryOptions))
     {
-        _core = new MaxBotCore(token, httpClient, attachmentRetryOptions);
-        InitModules();
     }
 
     /// <summary>
@@ -179,24 +221,42 @@ public class MaxBotClient : IMaxBotClient, IDisposable
         string token,
         int timeoutSeconds = 30,
         AttachmentRetryOptions? attachmentRetryOptions = null)
+        : this(new MaxBotCore(token, timeoutSeconds, attachmentRetryOptions))
     {
-        _core = new MaxBotCore(token, timeoutSeconds, attachmentRetryOptions);
-        InitModules();
     }
 
     private void InitModules()
     {
-        Messages = new MessagesModule(_core);
-        Chats = new ChatsModule(_core);
-        Members = new MembersModule(_core);
-        Attachments = new AttachmentsModule(_core);
-        Updates = new UpdatesModule(_core, this);
-        Subscriptions = new SubscriptionsModule(_core);
+        Messages = new MessagesModule(_transport);
+        Chats = new ChatsModule(_transport);
+        Members = new MembersModule(_transport);
+        Attachments = new AttachmentsModule(_transport);
+        Updates = new UpdatesModule(_transport, this);
+        Subscriptions = new SubscriptionsModule(_transport);
+        Comments = new CommentsModule(_transport);
     }
 
     /// <inheritdoc/>
     public Task<User> GetMeAsync(CancellationToken cancellationToken = default)
-        => _core.SendRequestAsync<User>(HttpMethod.Get, "/me", null, cancellationToken);
+        => _transport.SendRequestAsync<User>(HttpMethod.Get, "/me", null, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<BotInfo> GetMyInfoAsync(CancellationToken cancellationToken = default)
+        => _transport.SendRequestAsync<BotInfo>(HttpMethod.Get, "/me", null, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<BotCommandsInfo> EditMyCommandsAsync(List<BotCommand> commands, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException_ThrowIfNull(commands);
+        return EditMyCommandsAsync(new BotCommandsPatch { Commands = commands }, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task<BotCommandsInfo> EditMyCommandsAsync(BotCommandsPatch patch, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException_ThrowIfNull(patch);
+        return _transport.SendRequestAsync<BotCommandsInfo>(HttpMethod_Patch, "/me/commands", patch, cancellationToken);
+    }
 
     /// <inheritdoc/>
     public void StartPolling(
@@ -204,7 +264,8 @@ public class MaxBotClient : IMaxBotClient, IDisposable
         int? limit = 100,
         int? timeout = 30,
         long? marker = null,
-        List<string>? types = null)
+        List<string>? types = null,
+        bool parallelProcessing = true)
     {
         lock (_pollLock)
         {
@@ -219,7 +280,7 @@ public class MaxBotClient : IMaxBotClient, IDisposable
             {
                 try
                 {
-                    await Updates.PollUpdatesWithCallback(callback, limit, timeout, marker, types, token);
+                    await Updates.PollUpdatesWithCallback(callback, limit, timeout, marker, types, parallelProcessing, token);
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
@@ -247,6 +308,53 @@ public class MaxBotClient : IMaxBotClient, IDisposable
         }
     }
 
+    /// <inheritdoc/>
+    public async Task StopPollingAsync(CancellationToken cancellationToken = default)
+    {
+        Task? pollTaskToWait;
+        lock (_pollLock)
+        {
+            if (_pollCts == null)
+                return;
+
+            _pollCts.Cancel();
+            pollTaskToWait = _pollTask;
+        }
+
+        if (pollTaskToWait != null)
+        {
+            try
+            {
+                await Task.WhenAny(pollTaskToWait, Task.Delay(Timeout.Infinite, cancellationToken)).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Игнорируем отмену ожидания
+            }
+        }
+
+        lock (_pollLock)
+        {
+            _pollCts?.Dispose();
+            _pollCts = null;
+            _pollTask = null;
+        }
+    }
+
+    /// <summary>
+    /// Асинхронно освобождает ресурсы клиента: штатно останавливает polling с ожиданием и закрывает сетевой транспорт.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        await StopPollingAsync().ConfigureAwait(false);
+        _transport.Dispose();
+
+        GC.SuppressFinalize(this);
+    }
+
     /// <summary>
     /// Освобождает ресурсы клиента: останавливает polling и при необходимости закрывает HttpClient.
     /// </summary>
@@ -256,8 +364,9 @@ public class MaxBotClient : IMaxBotClient, IDisposable
         _disposed = true;
 
         StopPolling();
-        _core.Dispose();
+        _transport.Dispose();
 
         GC.SuppressFinalize(this);
     }
 }
+

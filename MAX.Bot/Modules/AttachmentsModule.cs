@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net.Http.Headers;
 using MAX.Bot.Exceptions;
 using MAX.Bot.Interfaces;
@@ -26,9 +27,9 @@ internal sealed class AttachmentsModule : IAttachmentsModule
     };
 #endif
 
-    private readonly MaxBotCore _core;
+    private readonly IMaxApiTransport _core;
 
-    internal AttachmentsModule(MaxBotCore core) => _core = core;
+    internal AttachmentsModule(IMaxApiTransport core) => _core = core;
 
     public async Task<VideoInfoResponse> GetVideoAsync(
         string videoToken,
@@ -39,7 +40,20 @@ internal sealed class AttachmentsModule : IAttachmentsModule
         return await _core.RetryWhileAttachmentNotReadyAsync(
             () => GetVideoInfoAsync(videoToken, cancellationToken),
             retryOptions,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<VideoAttachmentDetails> GetVideoDetailsAsync(
+        string videoToken,
+        AttachmentRetryOptions? retryOptions = null,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateVideoToken(videoToken);
+        return await _core.RetryWhileAttachmentNotReadyAsync(
+            () => _core.SendRequestAsync<VideoAttachmentDetails>(
+                HttpMethod.Get, $"/videos/{Uri.EscapeDataString(videoToken)}", null, cancellationToken),
+            retryOptions,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static void ValidateVideoToken(string videoToken)
@@ -64,7 +78,7 @@ internal sealed class AttachmentsModule : IAttachmentsModule
 
         try
         {
-            return await GetAttachmentDownloadUrlAsync(attachment, videoQuality, cancellationToken);
+            return await GetAttachmentDownloadUrlAsync(attachment, videoQuality, cancellationToken).ConfigureAwait(false);
         }
         catch (MaxBotClientException ex) when (ex.IsAttachmentNotReady)
         {
@@ -85,10 +99,10 @@ internal sealed class AttachmentsModule : IAttachmentsModule
         string? url = null;
         for (var attempt = 0; attempt < maxAttempts; attempt++)
         {
-            url = await TryGetAttachmentDownloadUrlAsync(attachment, options.VideoQuality, cancellationToken);
+            url = await TryGetAttachmentDownloadUrlAsync(attachment, options.VideoQuality, cancellationToken).ConfigureAwait(false);
             if (!string.IsNullOrWhiteSpace(url)) break;
             if (attempt < maxAttempts - 1)
-                await Task.Delay(options.RetryDelay, cancellationToken);
+                await Task.Delay(options.RetryDelay, cancellationToken).ConfigureAwait(false);
         }
 
         if (string.IsNullOrWhiteSpace(url))
@@ -100,15 +114,50 @@ internal sealed class AttachmentsModule : IAttachmentsModule
         }
 
         var fileName = ResolveDownloadFileName(options, url, attachment);
+        using var downloadCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        downloadCts.CancelAfter(options.DownloadTimeout);
+        var effectiveCt = downloadCts.Token;
 
         if (string.IsNullOrWhiteSpace(options.FilePath))
         {
+            using var response = await DownloadHttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, effectiveCt).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            if (response.Content.Headers.ContentLength.HasValue && response.Content.Headers.ContentLength.Value > options.MaxInMemorySizeBytes)
+            {
+                throw new InvalidOperationException(
+                    $"Размер вложения ({response.Content.Headers.ContentLength.Value} байт) превышает максимальный лимит для загрузки в оперативную память ({options.MaxInMemorySizeBytes} байт). Задайте FilePath в параметрах для потокового сохранения на диск.");
+            }
+
+            using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+            using var memoryStream = new MemoryStream();
+            var buffer = ArrayPool<byte>.Shared.Rent(81920);
+            try
+            {
+                long totalRead = 0;
+                int bytesRead;
+
 #if NET462
-            var content = await DownloadHttpClient.GetByteArrayAsync(url).ConfigureAwait(false);
+                while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
 #else
-            var content = await DownloadHttpClient.GetByteArrayAsync(url, cancellationToken);
+                while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, effectiveCt).ConfigureAwait(false)) > 0)
 #endif
-            return new AttachmentDownloadResult { Content = content, FileName = fileName };
+                {
+                    totalRead += bytesRead;
+                    if (totalRead > options.MaxInMemorySizeBytes)
+                    {
+                        throw new InvalidOperationException(
+                            $"Размер вложения превысил максимальный лимит для загрузки в оперативную память ({options.MaxInMemorySizeBytes} байт). Задайте FilePath в параметрах для потокового сохранения на диск.");
+                    }
+                    memoryStream.Write(buffer, 0, bytesRead);
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+
+            return new AttachmentDownloadResult { Content = memoryStream.ToArray(), FileName = fileName };
         }
 
         var savedFilePath = ResolveSavedFilePath(options.FilePath, url, attachment, options.DefaultExtension);
@@ -117,17 +166,18 @@ internal sealed class AttachmentsModule : IAttachmentsModule
             Directory.CreateDirectory(directory);
 
         // Потоковое скачивание непосредственно в файл без загрузки всего файла в RAM
-        using (var response = await DownloadHttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
+        using (var response = await DownloadHttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, effectiveCt).ConfigureAwait(false))
         {
             response.EnsureSuccessStatusCode();
-            using var streamToReadFrom = await response.Content.ReadAsStreamAsync();
+            using var streamToReadFrom = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
             using Stream streamToWriteTo = File.Create(savedFilePath);
 #if NET462
-            await streamToReadFrom.CopyToAsync(streamToWriteTo);
+            await streamToReadFrom.CopyToAsync(streamToWriteTo).ConfigureAwait(false);
 #else
-            await streamToReadFrom.CopyToAsync(streamToWriteTo, cancellationToken);
+            await streamToReadFrom.CopyToAsync(streamToWriteTo, effectiveCt).ConfigureAwait(false);
 #endif
         }
+
 
         return new AttachmentDownloadResult
         {
@@ -139,12 +189,20 @@ internal sealed class AttachmentsModule : IAttachmentsModule
     private static string ResolveDownloadFileName(DownloadAttachmentOptions options, string url, Attachment attachment)
     {
         var preferredFileName = attachment.GetFileName();
-        if (!string.IsNullOrWhiteSpace(preferredFileName)) return preferredFileName;
+        if (!string.IsNullOrWhiteSpace(preferredFileName))
+        {
+            var sanitized = SanitizeFileName(preferredFileName);
+            if (!string.IsNullOrWhiteSpace(sanitized)) return sanitized;
+        }
 
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
         {
             var fileName = Path.GetFileName(uri.AbsolutePath);
-            if (!string.IsNullOrWhiteSpace(fileName)) return fileName;
+            if (!string.IsNullOrWhiteSpace(fileName))
+            {
+                var sanitized = SanitizeFileName(fileName);
+                if (!string.IsNullOrWhiteSpace(sanitized)) return sanitized;
+            }
         }
 
         var extension = options.DefaultExtension ?? GetDefaultExtension(attachment) ?? ".bin";
@@ -152,11 +210,59 @@ internal sealed class AttachmentsModule : IAttachmentsModule
         return $"download{extension}";
     }
 
+    /// <summary>
+    /// Очищает имя файла от разделителей пути, недопустимых символов файловой системы и предотвращает уязвимость Path Traversal.
+    /// </summary>
+    /// <param name="fileName">Исходное потенциально небезопасное имя файла.</param>
+    /// <returns>Безопасное имя файла без путей и недопустимых символов.</returns>
+    private static string SanitizeFileName(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+            return string.Empty;
+
+        // Извлекаем только имя файла без каких-либо относительных или абсолютных путей (защита от ../ и ..\)
+        var cleanName = Path.GetFileName(fileName!.Trim());
+
+        // Удаляем недопустимые символы для имен файлов текущей ОС
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var sanitizedChars = cleanName.Where(c => !invalidChars.Contains(c)).ToArray();
+        var sanitized = new string(sanitizedChars).Trim();
+
+        // Проверяем на пустую строку или системные зарезервированные имена устройств Windows
+        if (string.IsNullOrWhiteSpace(sanitized) || IsReservedWindowsDeviceName(sanitized))
+            return string.Empty;
+
+        return sanitized;
+    }
+
+    /// <summary>
+    /// Проверяет, является ли имя зарезервированным именем системного устройства Windows (CON, PRN, AUX, NUL, COM1-9, LPT1-9).
+    /// </summary>
+    /// <param name="fileName">Имя файла для проверки.</param>
+    /// <returns>True, если имя зарезервировано, иначе false.</returns>
+    private static bool IsReservedWindowsDeviceName(string fileName)
+    {
+        var nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+        if (string.IsNullOrEmpty(nameWithoutExt)) return false;
+
+        return nameWithoutExt.Equals("CON", StringComparison.OrdinalIgnoreCase) ||
+               nameWithoutExt.Equals("PRN", StringComparison.OrdinalIgnoreCase) ||
+               nameWithoutExt.Equals("AUX", StringComparison.OrdinalIgnoreCase) ||
+               nameWithoutExt.Equals("NUL", StringComparison.OrdinalIgnoreCase) ||
+               (nameWithoutExt.Length == 4 &&
+                (nameWithoutExt.StartsWith("COM", StringComparison.OrdinalIgnoreCase) ||
+                 nameWithoutExt.StartsWith("LPT", StringComparison.OrdinalIgnoreCase)) &&
+                char.IsDigit(nameWithoutExt[3]));
+    }
+
     private static string ResolveSavedFilePath(string filePath, string url, Attachment attachment, string? defaultExtension)
     {
         if (HasRecognizedFileExtension(filePath)) return filePath;
 
-        var extension = Path.GetExtension(attachment.GetFileName() ?? string.Empty);
+        var rawFileName = attachment.GetFileName();
+        var sanitizedFileName = !string.IsNullOrWhiteSpace(rawFileName) ? SanitizeFileName(rawFileName) : string.Empty;
+        var extension = Path.GetExtension(sanitizedFileName);
+
         if (string.IsNullOrWhiteSpace(extension) && Uri.TryCreate(url, UriKind.Absolute, out var uri))
             extension = Path.GetExtension(uri.AbsolutePath);
         if (string.IsNullOrWhiteSpace(extension))
@@ -193,7 +299,7 @@ internal sealed class AttachmentsModule : IAttachmentsModule
             case FileAttachment file:   return file.Payload.Url;
             case ShareAttachment share: return share.Payload.Url;
             case VideoAttachment video:
-                return (await GetVideoInfoAsync(video.Payload.Token, cancellationToken))
+                return (await GetVideoInfoAsync(video.Payload.Token, cancellationToken).ConfigureAwait(false))
                     .TryGetDownloadUrl(videoQuality);
             default:
                 throw new NotSupportedException(
@@ -215,13 +321,13 @@ internal sealed class AttachmentsModule : IAttachmentsModule
             HttpMethod.Post,
             $"/uploads?type={HttpUtility_UrlEncode(uploadType)}",
             null,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         if (string.IsNullOrWhiteSpace(uploadInfo.Url))
             throw new InvalidOperationException("API MAX вернул пустой URL для загрузки файла");
 
         var uploadUri = CreateUploadUri(uploadInfo.Url);
-        var uploadResponse = await UploadFileAsync(uploadUri, request, cancellationToken);
+        var uploadResponse = await UploadFileAsync(uploadUri, request, cancellationToken).ConfigureAwait(false);
         return ResolveUploadToken(request, uploadInfo, uploadResponse);
     }
 
@@ -238,8 +344,8 @@ internal sealed class AttachmentsModule : IAttachmentsModule
         using var multipartContent = new MultipartFormDataContent();
         multipartContent.Add(fileContent, "data", request.FileName);
 
-        var response = await _core.HttpClient.PostAsync(uploadUri, multipartContent, cancellationToken);
-        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+        var response = await _core.PostMultipartAsync(uploadUri, multipartContent, cancellationToken).ConfigureAwait(false);
+        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
         if (!response.IsSuccessStatusCode)
             throw new MaxBotClientException($"HTTP {response.StatusCode}: {responseContent}", response.StatusCode);

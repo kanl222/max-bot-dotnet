@@ -35,6 +35,10 @@ public sealed class UpdateJsonConverter : JsonConverter<Update>
             UpdateTypes.MessageRemoved => ReadMessageRemoved(root),
             UpdateTypes.UserAdded => ReadUserAdded(root, options),
             UpdateTypes.UserRemoved => ReadUserRemoved(root, options),
+            UpdateTypes.CommentCreated => ReadCommentCreated(root, options),
+            UpdateTypes.CommentEdited => ReadCommentEdited(root, options),
+            UpdateTypes.CommentRemoved => ReadCommentRemoved(root),
+            UpdateTypes.BotAdminPermissionsChanged => ReadBotAdminPermissionsChanged(root, options),
             _ => ReadBase(root, updateType)
         };
     }
@@ -106,6 +110,26 @@ public sealed class UpdateJsonConverter : JsonConverter<Update>
             case UserRemovedFromChatUpdate update:
                 WriteChatUserChannelFields(writer, update.ChatId, update.User, update.IsChannel, options);
                 WriteNullableNumber(writer, "admin_id", update.AdminId);
+                break;
+            case CommentCreatedUpdate update:
+                WriteObject(writer, "message", update.Message, options);
+                break;
+            case CommentEditedUpdate update:
+                WriteObject(writer, "message", update.Message, options);
+                break;
+            case CommentRemovedUpdate update:
+                writer.WriteString("message_id", update.MessageId);
+                writer.WriteNumber("chat_id", update.ChatId);
+                writer.WriteString("post_id", update.PostId);
+                writer.WriteNumber("user_id", update.UserId);
+                break;
+            case BotAdminPermissionsChangedUpdate update:
+                writer.WriteNumber("bot_id", update.BotId);
+                writer.WriteNumber("chat_id", update.ChatId);
+                writer.WriteBoolean("is_admin", update.IsAdmin);
+                writer.WriteBoolean("is_channel", update.IsChannel);
+                WriteObject(writer, "permissions", update.Permissions, options);
+                writer.WriteNumber("user_id", update.UserId);
                 break;
         }
 
@@ -268,6 +292,46 @@ public sealed class UpdateJsonConverter : JsonConverter<Update>
             User = DeserializeProperty<User>(root, "user", options),
             AdminId = GetNullableInt64(root, "admin_id"),
             IsChannel = GetBoolean(root, "is_channel")
+        });
+    }
+
+    private static CommentCreatedUpdate ReadCommentCreated(JsonElement root, JsonSerializerOptions options)
+    {
+        return FillBase(root, new CommentCreatedUpdate
+        {
+            Message = DeserializeProperty<Message>(root, "message", options)!
+        });
+    }
+
+    private static CommentEditedUpdate ReadCommentEdited(JsonElement root, JsonSerializerOptions options)
+    {
+        return FillBase(root, new CommentEditedUpdate
+        {
+            Message = DeserializeProperty<Message>(root, "message", options)!
+        });
+    }
+
+    private static CommentRemovedUpdate ReadCommentRemoved(JsonElement root)
+    {
+        return FillBase(root, new CommentRemovedUpdate
+        {
+            MessageId = GetString(root, "message_id") ?? string.Empty,
+            PostId = GetString(root, "post_id") ?? string.Empty,
+            ChatId = GetInt64(root, "chat_id"),
+            UserId = GetInt64(root, "user_id")
+        });
+    }
+
+    private static BotAdminPermissionsChangedUpdate ReadBotAdminPermissionsChanged(JsonElement root, JsonSerializerOptions options)
+    {
+        return FillBase(root, new BotAdminPermissionsChangedUpdate
+        {
+            BotId = GetInt64(root, "bot_id"),
+            ChatId = GetInt64(root, "chat_id"),
+            IsAdmin = GetBoolean(root, "is_admin"),
+            IsChannel = GetBoolean(root, "is_channel"),
+            Permissions = DeserializeProperty<List<string>>(root, "permissions", options),
+            UserId = GetInt64(root, "user_id")
         });
     }
 

@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 
 namespace MAX.Bot.Interfaces.Models;
 
@@ -122,4 +122,54 @@ public record BotRemovedFromChatUpdate : Update
     /// </summary>
     [JsonPropertyName("is_channel")]
     public bool IsChannel { get; set; }
+}
+
+/// <summary>
+/// Обновление: изменены права администратора у бота в чате или канале.
+/// </summary>
+public record BotAdminPermissionsChangedUpdate : Update
+{
+    /// <summary>
+    /// Инициализирует новый экземпляр обновления об изменении прав администратора бота.
+    /// </summary>
+    public BotAdminPermissionsChangedUpdate()
+    {
+        UpdateType = UpdateTypes.BotAdminPermissionsChanged;
+    }
+
+    /// <summary>
+    /// Идентификатор бота, чьи права администратора изменились.
+    /// </summary>
+    [JsonPropertyName("bot_id")]
+    public long BotId { get; set; }
+
+    /// <summary>
+    /// Идентификатор чата или канала, где произошло событие.
+    /// </summary>
+    [JsonPropertyName("chat_id")]
+    public long ChatId { get; set; }
+
+    /// <summary>
+    /// Указывает, является ли бот администратором в чате или канале.
+    /// </summary>
+    [JsonPropertyName("is_admin")]
+    public bool IsAdmin { get; set; }
+
+    /// <summary>
+    /// Указывает, произошло ли изменение прав в канале.
+    /// </summary>
+    [JsonPropertyName("is_channel")]
+    public bool IsChannel { get; set; }
+
+    /// <summary>
+    /// Список прав администратора бота.
+    /// </summary>
+    [JsonPropertyName("permissions")]
+    public List<string>? Permissions { get; set; }
+
+    /// <summary>
+    /// Идентификатор пользователя или бота, изменившего права администратора бота.
+    /// </summary>
+    [JsonPropertyName("user_id")]
+    public long UserId { get; set; }
 }

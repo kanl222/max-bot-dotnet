@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 using MAX.Bot.Interfaces.Models;
 
 namespace MAX.Bot.Interfaces.Models.Request;
@@ -6,14 +6,8 @@ namespace MAX.Bot.Interfaces.Models.Request;
 /// <summary>
 /// Запрос на назначение администраторов группового чата.
 /// </summary>
-public record AddChatAdminsRequest
+public record AddChatAdminsRequest : ChatAdminsList
 {
-    /// <summary>
-    /// Список пользователей, которые получат права администратора чата.
-    /// </summary>
-    [JsonPropertyName("admins")]
-    public List<ChatAdmin> Admins { get; set; } = new();
-
     /// <summary>
     /// Указатель на следующую страницу данных.
     /// </summary>
@@ -105,6 +99,9 @@ public record ChatAdmin
             ChatAdminPermission.EditLink or
             ChatAdminPermission.PostEditDeleteMessage or
             ChatAdminPermission.EditMessage or
-            ChatAdminPermission.DeleteMessage;
+            ChatAdminPermission.DeleteMessage or
+            ChatAdminPermission.Edit or
+            ChatAdminPermission.Delete or
+            ChatAdminPermission.ViewStats;
     }
 }

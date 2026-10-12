@@ -8,9 +8,9 @@ namespace MAX.Bot.Modules;
 
 internal sealed class ChatsModule : IChatsModule
 {
-    private readonly MaxBotCore _core;
+    private readonly IMaxApiTransport _core;
 
-    internal ChatsModule(MaxBotCore core) => _core = core;
+    internal ChatsModule(IMaxApiTransport core) => _core = core;
 
     public async Task<GetChatsResponse> GetChatsAsync(
         GetChatsRequest request,
@@ -27,12 +27,12 @@ internal sealed class ChatsModule : IChatsModule
         var queryString = MaxBotCore.BuildQueryString(queryParams);
 
         return await _core.SendRequestAsync<GetChatsResponse>(
-            HttpMethod.Get, $"/chats{queryString}", null, cancellationToken);
+            HttpMethod.Get, $"/chats{queryString}", null, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<Chat> GetChatByIdAsync(long chatId, CancellationToken cancellationToken = default)
         => await _core.SendRequestAsync<Chat>(
-            HttpMethod.Get, $"/chats/{chatId}", null, cancellationToken);
+            HttpMethod.Get, $"/chats/{chatId}", null, cancellationToken).ConfigureAwait(false);
 
     public async Task<Chat> UpdateChatAsync(
         long chatId,
@@ -43,12 +43,12 @@ internal sealed class ChatsModule : IChatsModule
         request.Validate();
 
         return await _core.SendRequestAsync<Chat>(
-            HttpMethod_Patch, $"/chats/{chatId}", request, cancellationToken);
+            HttpMethod_Patch, $"/chats/{chatId}", request, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<BaseResponse> DeleteChatAsync(long chatId, CancellationToken cancellationToken = default)
         => await _core.SendRequestAsync<BaseResponse>(
-            HttpMethod.Delete, $"/chats/{chatId}", null, cancellationToken);
+            HttpMethod.Delete, $"/chats/{chatId}", null, cancellationToken).ConfigureAwait(false);
 
     public async Task<BaseResponse> SendChatActionAsync(
         long chatId,
@@ -59,14 +59,14 @@ internal sealed class ChatsModule : IChatsModule
         request.Validate();
 
         return await _core.SendRequestAsync<BaseResponse>(
-            HttpMethod.Post, $"/chats/{chatId}/actions", request, cancellationToken);
+            HttpMethod.Post, $"/chats/{chatId}/actions", request, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<GetChatPinnedMessageResponse> GetChatPinnedMessageAsync(
         long chatId,
         CancellationToken cancellationToken = default)
         => await _core.SendRequestAsync<GetChatPinnedMessageResponse>(
-            HttpMethod.Get, $"/chats/{chatId}/pin", null, cancellationToken);
+            HttpMethod.Get, $"/chats/{chatId}/pin", null, cancellationToken).ConfigureAwait(false);
 
     public async Task<BaseResponse> PinChatMessageAsync(
         long chatId,
@@ -77,12 +77,12 @@ internal sealed class ChatsModule : IChatsModule
         request.Validate();
 
         return await _core.SendRequestAsync<BaseResponse>(
-            HttpMethod.Put, $"/chats/{chatId}/pin", request, cancellationToken);
+            HttpMethod.Put, $"/chats/{chatId}/pin", request, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<BaseResponse> UnpinChatMessageAsync(
         long chatId,
         CancellationToken cancellationToken = default)
         => await _core.SendRequestAsync<BaseResponse>(
-            HttpMethod.Delete, $"/chats/{chatId}/pin", null, cancellationToken);
+            HttpMethod.Delete, $"/chats/{chatId}/pin", null, cancellationToken).ConfigureAwait(false);
 }

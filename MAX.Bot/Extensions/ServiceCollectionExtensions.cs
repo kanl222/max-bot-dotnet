@@ -19,12 +19,18 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
         });
 
-        services.AddSingleton<IMaxBotClient>(provider =>
+        services.AddSingleton<IMaxApiTransport>(provider =>
         {
             var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
             var httpClient = httpClientFactory.CreateClient("MaxBot");
 
-            return new MaxBotClient(token, httpClient, attachmentRetryOptions);
+            return new MaxBotCore(token, httpClient, attachmentRetryOptions);
+        });
+
+        services.AddSingleton<IMaxBotClient>(provider =>
+        {
+            var transport = provider.GetRequiredService<IMaxApiTransport>();
+            return new MaxBotClient(transport);
         });
 
         return services;

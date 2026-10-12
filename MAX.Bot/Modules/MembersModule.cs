@@ -8,27 +8,27 @@ namespace MAX.Bot.Modules;
 
 internal sealed class MembersModule : IMembersModule
 {
-    private readonly MaxBotCore _core;
+    private readonly IMaxApiTransport _core;
 
-    internal MembersModule(MaxBotCore core) => _core = core;
+    internal MembersModule(IMaxApiTransport core) => _core = core;
 
     public async Task<ChatMember> GetChatMembershipAsync(
         long chatId,
         CancellationToken cancellationToken = default)
         => await _core.SendRequestAsync<ChatMember>(
-            HttpMethod.Get, $"/chats/{chatId}/members/me", null, cancellationToken);
+            HttpMethod.Get, $"/chats/{chatId}/members/me", null, cancellationToken).ConfigureAwait(false);
 
     public async Task<BaseResponse> LeaveChatAsync(
         long chatId,
         CancellationToken cancellationToken = default)
         => await _core.SendRequestAsync<BaseResponse>(
-            HttpMethod.Delete, $"/chats/{chatId}/members/me", null, cancellationToken);
+            HttpMethod.Delete, $"/chats/{chatId}/members/me", null, cancellationToken).ConfigureAwait(false);
 
     public async Task<GetChatMembersResponse> GetChatAdminsAsync(
         long chatId,
         CancellationToken cancellationToken = default)
         => await _core.SendRequestAsync<GetChatMembersResponse>(
-            HttpMethod.Get, $"/chats/{chatId}/members/admins", null, cancellationToken);
+            HttpMethod.Get, $"/chats/{chatId}/members/admins", null, cancellationToken).ConfigureAwait(false);
 
     public async Task<BaseResponse> AddChatAdminsAsync(
         long chatId,
@@ -39,7 +39,18 @@ internal sealed class MembersModule : IMembersModule
         request.Validate();
 
         return await _core.SendRequestAsync<BaseResponse>(
-            HttpMethod.Post, $"/chats/{chatId}/members/admins", request, cancellationToken);
+            HttpMethod.Post, $"/chats/{chatId}/members/admins", request, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<BaseResponse> AddChatAdminsAsync(
+        long chatId,
+        ChatAdminsList adminsList,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException_ThrowIfNull(adminsList);
+
+        return await _core.SendRequestAsync<BaseResponse>(
+            HttpMethod.Post, $"/chats/{chatId}/members/admins", adminsList, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<BaseResponse> RemoveChatAdminAsync(
@@ -51,7 +62,7 @@ internal sealed class MembersModule : IMembersModule
             throw new ArgumentException("ID пользователя должен быть положительным числом.", nameof(userId));
 
         return await _core.SendRequestAsync<BaseResponse>(
-            HttpMethod.Delete, $"/chats/{chatId}/members/admins/{userId}", null, cancellationToken);
+            HttpMethod.Delete, $"/chats/{chatId}/members/admins/{userId}", null, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<GetChatMembersResponse> GetChatMembersAsync(
@@ -74,7 +85,7 @@ internal sealed class MembersModule : IMembersModule
         var queryString = MaxBotCore.BuildQueryString(queryParams);
 
         return await _core.SendRequestAsync<GetChatMembersResponse>(
-            HttpMethod.Get, $"/chats/{request.ChatId}/members{queryString}", null, cancellationToken);
+            HttpMethod.Get, $"/chats/{request.ChatId}/members{queryString}", null, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<BaseResponse> DeleteChatMemberAsync(
@@ -94,16 +105,16 @@ internal sealed class MembersModule : IMembersModule
         var queryString = MaxBotCore.BuildQueryString(queryParams);
 
         return await _core.SendRequestAsync<BaseResponse>(
-            HttpMethod.Delete, $"/chats/{request.ChatId}/members{queryString}", null, cancellationToken);
+            HttpMethod.Delete, $"/chats/{request.ChatId}/members{queryString}", null, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<BaseResponse> AddChatMemberAsync(
+    public async Task<ModifyMembersResult> AddChatMemberAsync(
         AddChatMemberRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException_ThrowIfNull(request);
 
-        return await _core.SendRequestAsync<BaseResponse>(
-            HttpMethod.Post, $"/chats/{request.ChatId}/members", request, cancellationToken);
+        return await _core.SendRequestAsync<ModifyMembersResult>(
+            HttpMethod.Post, $"/chats/{request.ChatId}/members", request, cancellationToken).ConfigureAwait(false);
     }
 }
