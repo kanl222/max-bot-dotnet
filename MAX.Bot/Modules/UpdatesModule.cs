@@ -1,3 +1,4 @@
+using System.Globalization;
 using MAX.Bot.Interfaces;
 using MAX.Bot.Interfaces.Models;
 using MAX.Bot.Interfaces.Models.Request;
@@ -8,6 +9,11 @@ namespace MAX.Bot.Modules;
 
 internal sealed class UpdatesModule : IUpdatesModule
 {
+    private const int MaxBackoffMs = 5000;
+    private const int MaxJitterMs = 500;
+    private const int MaxBackoffExponent = 30; // защита от переполнения счётчика ошибок
+    private static readonly TimeSpan ShutdownGracePeriod = TimeSpan.FromSeconds(10);
+
     private readonly IMaxApiTransport _core;
     private readonly IMaxBotClient _client;
 
@@ -16,6 +22,12 @@ internal sealed class UpdatesModule : IUpdatesModule
         _core = core;
         _client = client;
     }
+
+    /// <summary>
+    /// Максимум одновременно обрабатываемых обновлений в параллельном режиме.
+    /// Ограничивает рост задач и нагрузку на пул потоков при всплеске входящих сообщений.
+    /// </summary>
+    public int MaxConcurrency { get; set; } = 32;
 
     public event Func<Update, IMaxBotClient, Task>? OnUpdate;
     public event Func<MessageCreatedUpdate, IMaxBotClient, Task>? OnMessageCreated;
@@ -43,18 +55,18 @@ internal sealed class UpdatesModule : IUpdatesModule
         GetUpdatesRequest request,
         CancellationToken cancellationToken = default)
     {
-        var queryParams = new Dictionary<string, string>();
+        var queryParams = new Dictionary<string, string>(4);
 
         if (request.Limit.HasValue)
-            queryParams["limit"] = request.Limit.Value.ToString();
+            queryParams["limit"] = request.Limit.Value.ToString(CultureInfo.InvariantCulture);
 
         if (request.Timeout.HasValue)
-            queryParams["timeout"] = request.Timeout.Value.ToString();
+            queryParams["timeout"] = request.Timeout.Value.ToString(CultureInfo.InvariantCulture);
 
         if (request.Marker.HasValue)
-            queryParams["marker"] = request.Marker.Value.ToString();
+            queryParams["marker"] = request.Marker.Value.ToString(CultureInfo.InvariantCulture);
 
-        if (request.Types != null && request.Types.Count != 0)
+        if (request.Types is { Count: > 0 })
             queryParams["types"] = string.Join(",", request.Types);
 
         var queryString = MaxBotCore.BuildQueryString(queryParams);
@@ -81,64 +93,110 @@ internal sealed class UpdatesModule : IUpdatesModule
         bool parallelProcessing,
         CancellationToken cancellationToken = default)
     {
-        long? currentMarker = marker;
+        var currentMarker = marker;
         var consecutiveErrors = 0;
         var random = new Random();
 
-        while (!cancellationToken.IsCancellationRequested)
+        var concurrency = Math.Max(1, MaxConcurrency);
+        var throttle = parallelProcessing ? new SemaphoreSlim(concurrency, concurrency) : null;
+
+        try
         {
-            try
+            while (!cancellationToken.IsCancellationRequested)
             {
-                var response = await GetUpdatesAsync(new GetUpdatesRequest
+                try
                 {
-                    Limit = limit,
-                    Timeout = timeout,
-                    Marker = currentMarker,
-                    Types = types
-                }, cancellationToken).ConfigureAwait(false);
-
-                consecutiveErrors = 0; // Сбрасываем счётчик при успешном запросе
-
-                foreach (var update in response.Updates)
-                {
-                    if (parallelProcessing)
+                    var response = await GetUpdatesAsync(new GetUpdatesRequest
                     {
-                        // Неблокирующая параллельная обработка: медленный обработчик не подвешивает опрос очереди
-                        _ = ProcessUpdateAsync(update, callback, cancellationToken);
-                    }
-                    else
+                        Limit = limit,
+                        Timeout = timeout,
+                        Marker = currentMarker,
+                        Types = types
+                    }, cancellationToken).ConfigureAwait(false);
+
+                    consecutiveErrors = 0;
+
+                    if (response.Updates is not null)
                     {
-                        await ProcessUpdateAsync(update, callback, cancellationToken).ConfigureAwait(false);
+                        foreach (var update in response.Updates)
+                        {
+                            if (throttle is null)
+                            {
+                                await ProcessUpdateAsync(update, callback, cancellationToken).ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                await throttle.WaitAsync(cancellationToken).ConfigureAwait(false);
+                                _ = RunThrottledAsync(update, callback, throttle, cancellationToken);
+                            }
+                        }
                     }
+
+                    // Не сбрасываем маркер, если сервер не прислал новый (иначе получим дубликаты)
+                    if (response.Marker is long newMarker)
+                        currentMarker = newMarker;
                 }
-
-                currentMarker = response.Marker;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                consecutiveErrors++;
-
-                if (OnPollingError != null)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    consecutiveErrors = Math.Min(consecutiveErrors + 1, MaxBackoffExponent);
+
+                    await ReportErrorAsync(ex).ConfigureAwait(false);
+
+                    // Экспоненциальная задержка с джиттером
+                    var delay = Math.Min(1000 * Math.Pow(1.5, consecutiveErrors - 1), MaxBackoffMs);
+                    var wait = (int)delay + random.Next(0, MaxJitterMs);
+
                     try
                     {
-                        await InvokeErrorAsync(OnPollingError, ex).ConfigureAwait(false);
+                        await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
                     }
-                    catch
+                    catch (OperationCanceledException)
                     {
-                        // Игнорируем исключения внутри пользовательского обработчика ошибок
+                        // Отмена во время паузы — штатный выход, а не исключение наружу
+                        break;
                     }
                 }
-
-                // Экспоненциальная задержка с джиттером (максимум 5 секунд вместо 60 для быстрого восстановления)
-                var delay = Math.Min(1000 * Math.Pow(1.5, consecutiveErrors - 1), 5000);
-                var jitter = random.Next(0, 500);
-                await Task.Delay((int)delay + jitter, cancellationToken).ConfigureAwait(false);
             }
+        }
+        finally
+        {
+            // Graceful shutdown: ждём уже запущенные обработчики, но не бесконечно
+            if (throttle is not null)
+                await DrainAsync(throttle, concurrency).ConfigureAwait(false);
+        }
+    }
+
+    private async Task RunThrottledAsync(
+        Update update,
+        Func<Update, IMaxBotClient, Task>? callback,
+        SemaphoreSlim throttle,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Уходим с потока опроса, чтобы синхронная часть обработчика его не блокировала
+            await Task.Yield();
+            await ProcessUpdateAsync(update, callback, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            throttle.Release();
+        }
+    }
+
+    private static async Task DrainAsync(SemaphoreSlim throttle, int concurrency)
+    {
+        var deadline = DateTime.UtcNow + ShutdownGracePeriod;
+
+        for (var i = 0; i < concurrency; i++)
+        {
+            var left = deadline - DateTime.UtcNow;
+            if (left <= TimeSpan.Zero || !await throttle.WaitAsync(left).ConfigureAwait(false))
+                break;
         }
     }
 
@@ -160,30 +218,42 @@ internal sealed class UpdatesModule : IUpdatesModule
         }
         catch (Exception ex)
         {
-            // Изоляция ошибок в пользовательских обработчиках событий (защита от Poison Pill DoS).
-            // Ошибка в обработке одного сообщения не должна останавливать цикл и блокировать продвижение маркера.
-            if (OnPollingError != null)
-            {
-                try
-                {
-                    await InvokeErrorAsync(OnPollingError, ex).ConfigureAwait(false);
-                }
-                catch
-                {
-                    // Игнорируем исключения внутри пользовательского обработчика ошибок
-                }
-            }
+            // Изоляция ошибок пользовательских обработчиков (защита от Poison Pill):
+            // сбой одного сообщения не останавливает цикл и не блокирует продвижение маркера.
+            await ReportErrorAsync(ex).ConfigureAwait(false);
+        }
+    }
+
+    private async Task ReportErrorAsync(Exception ex)
+    {
+        var handler = OnPollingError;
+        if (handler is null) return;
+
+        try
+        {
+            await InvokeErrorAsync(handler, ex).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Исключения внутри пользовательского обработчика ошибок игнорируем
         }
     }
 
     public async Task DispatchUpdateAsync(Update update)
     {
+        if (update is null)
+            throw new ArgumentNullException(nameof(update));
+
         await InvokeAsync(OnUpdate, update, _client).ConfigureAwait(false);
 
+        // Порядок case — от самых частых событий к редким
         switch (update)
         {
             case MessageCreatedUpdate messageCreated:
                 await InvokeAsync(OnMessageCreated, messageCreated, _client).ConfigureAwait(false);
+                break;
+            case MessageCallbackUpdate messageCallback:
+                await InvokeAsync(OnMessageCallback, messageCallback, _client).ConfigureAwait(false);
                 break;
             case MessageEditedUpdate messageEdited:
                 await InvokeAsync(OnMessageEdited, messageEdited, _client).ConfigureAwait(false);
@@ -191,14 +261,17 @@ internal sealed class UpdatesModule : IUpdatesModule
             case MessageRemovedUpdate messageRemoved:
                 await InvokeAsync(OnMessageRemoved, messageRemoved, _client).ConfigureAwait(false);
                 break;
-            case MessageCallbackUpdate messageCallback:
-                await InvokeAsync(OnMessageCallback, messageCallback, _client).ConfigureAwait(false);
+            case BotStartedUpdate botStarted:
+                await InvokeAsync(OnBotStarted, botStarted, _client).ConfigureAwait(false);
                 break;
             case BotAddedToChatUpdate botAdded:
                 await InvokeAsync(OnBotAddedToChat, botAdded, _client).ConfigureAwait(false);
                 break;
-            case BotStartedUpdate botStarted:
-                await InvokeAsync(OnBotStarted, botStarted, _client).ConfigureAwait(false);
+            case UserAddedToChatUpdate userAdded:
+                await InvokeAsync(OnUserAddedToChat, userAdded, _client).ConfigureAwait(false);
+                break;
+            case UserRemovedFromChatUpdate userRemoved:
+                await InvokeAsync(OnUserRemovedFromChat, userRemoved, _client).ConfigureAwait(false);
                 break;
             case BotStoppedUpdate botStopped:
                 await InvokeAsync(OnBotStopped, botStopped, _client).ConfigureAwait(false);
@@ -209,11 +282,14 @@ internal sealed class UpdatesModule : IUpdatesModule
             case ChatTitleChangedUpdate titleChanged:
                 await InvokeAsync(OnChatTitleChanged, titleChanged, _client).ConfigureAwait(false);
                 break;
-            case UserAddedToChatUpdate userAdded:
-                await InvokeAsync(OnUserAddedToChat, userAdded, _client).ConfigureAwait(false);
+            case CommentCreatedUpdate commentCreated:
+                await InvokeAsync(OnCommentCreated, commentCreated, _client).ConfigureAwait(false);
                 break;
-            case UserRemovedFromChatUpdate userRemoved:
-                await InvokeAsync(OnUserRemovedFromChat, userRemoved, _client).ConfigureAwait(false);
+            case CommentEditedUpdate commentEdited:
+                await InvokeAsync(OnCommentEdited, commentEdited, _client).ConfigureAwait(false);
+                break;
+            case CommentRemovedUpdate commentRemoved:
+                await InvokeAsync(OnCommentRemoved, commentRemoved, _client).ConfigureAwait(false);
                 break;
             case DialogClearedUpdate dialogCleared:
                 await InvokeAsync(OnDialogCleared, dialogCleared, _client).ConfigureAwait(false);
@@ -227,36 +303,60 @@ internal sealed class UpdatesModule : IUpdatesModule
             case DialogRemovedUpdate dialogRemoved:
                 await InvokeAsync(OnDialogRemoved, dialogRemoved, _client).ConfigureAwait(false);
                 break;
-            case CommentCreatedUpdate commentCreated:
-                await InvokeAsync(OnCommentCreated, commentCreated, _client).ConfigureAwait(false);
-                break;
-            case CommentEditedUpdate commentEdited:
-                await InvokeAsync(OnCommentEdited, commentEdited, _client).ConfigureAwait(false);
-                break;
-            case CommentRemovedUpdate commentRemoved:
-                await InvokeAsync(OnCommentRemoved, commentRemoved, _client).ConfigureAwait(false);
-                break;
             case BotAdminPermissionsChangedUpdate botAdminPermissionsChanged:
                 await InvokeAsync(OnBotAdminPermissionsChanged, botAdminPermissionsChanged, _client).ConfigureAwait(false);
                 break;
         }
     }
 
-    private static async Task InvokeAsync<TUpdate>(Func<TUpdate, IMaxBotClient, Task>? handler, TUpdate update, IMaxBotClient client)
+    // Не async: для обычного случая (один подписчик) возвращаем Task обработчика напрямую,
+    // без лишней машины состояний.
+    private static Task InvokeAsync<TUpdate>(
+        Func<TUpdate, IMaxBotClient, Task>? handler, TUpdate update, IMaxBotClient client)
     {
-        if (handler == null) return;
-        foreach (Func<TUpdate, IMaxBotClient, Task> singleCast in handler.GetInvocationList().Cast<Func<TUpdate, IMaxBotClient, Task>>())
-        {
-            await singleCast(update, client);
-        }
+        if (handler is null) return Task.CompletedTask;
+
+        var list = handler.GetInvocationList();
+        if (list.Length == 1)
+            return handler(update, client);
+
+        return InvokeMulticastAsync(list, update, client);
     }
 
-    private static async Task InvokeErrorAsync(Func<Exception, Task>? handler, Exception ex)
+    private static async Task InvokeMulticastAsync<TUpdate>(
+        Delegate[] list, TUpdate update, IMaxBotClient client)
     {
-        if (handler == null) return;
-        foreach (Func<Exception, Task> singleCast in handler.GetInvocationList().Cast<Func<Exception, Task>>())
+        List<Exception>? errors = null;
+
+        // Ошибка одного подписчика не должна лишать остальных события
+        foreach (var d in list)
         {
-            await singleCast(ex);
+            try
+            {
+                await ((Func<TUpdate, IMaxBotClient, Task>)d)(update, client).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                (errors ??= new List<Exception>()).Add(ex);
+            }
+        }
+
+        if (errors is not null)
+            throw new AggregateException(errors);
+    }
+
+    private static async Task InvokeErrorAsync(Func<Exception, Task> handler, Exception ex)
+    {
+        foreach (var d in handler.GetInvocationList())
+        {
+            try
+            {
+                await ((Func<Exception, Task>)d)(ex).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Один сломанный обработчик ошибок не мешает остальным
+            }
         }
     }
 }
