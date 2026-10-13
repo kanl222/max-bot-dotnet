@@ -6,5 +6,5 @@ public sealed class StickerPayload : AttachmentPayload
     /// Код стикера
     /// </summary>
     [JsonPropertyName("code")]
-    public string Code { get; set; }
+    public string Code { get; set; } = string.Empty;
 }

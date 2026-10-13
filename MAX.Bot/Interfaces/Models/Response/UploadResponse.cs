@@ -1,4 +1,4 @@
-﻿namespace MAX.Bot.Interfaces.Models.Response;
+namespace MAX.Bot.Interfaces.Models.Response;
 
 /// <summary>
 /// Ответ на загрузку файла
@@ -11,7 +11,7 @@ public record UploadResponse
 	public record UploadImageElementResponse
 	{
 		[JsonPropertyName("token")]
-		public string Token { get; set; }
+		public string Token { get; set; } = string.Empty;
 	}
 
 	/// <summary>
@@ -30,7 +30,7 @@ public record UploadResponse
     /// Набор токенов для картинок
     /// </summary>
 	[JsonPropertyName("photos")]
-	public Dictionary<string, UploadImageElementResponse> Photos { get; set; }
+	public Dictionary<string, UploadImageElementResponse>? Photos { get; set; }
 
 	/// <summary>
 	/// Результат загрузки видео или аудио

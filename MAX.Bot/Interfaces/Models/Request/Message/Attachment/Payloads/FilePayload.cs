@@ -15,5 +15,5 @@ public sealed class FilePayload: AttachmentPayload
     /// Токен — уникальный ID загруженного медиафайла
     /// </summary>
     [JsonPropertyName("token")]
-    public string Token { get; set; }
+    public string Token { get; set; } = string.Empty;
 }

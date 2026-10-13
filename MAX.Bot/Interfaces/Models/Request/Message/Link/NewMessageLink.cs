@@ -15,5 +15,5 @@ public record NewMessageLink
     /// ID сообщения исходного сообщения
     /// </summary>
     [JsonPropertyName("mid")]
-    public string MId { get; set; }
+    public string MId { get; set; } = string.Empty;
 }
