@@ -113,14 +113,14 @@ internal sealed class AttachmentsModule : IAttachmentsModule
                 isAttachmentNotReady: true);
         }
 
-        var fileName = ResolveDownloadFileName(options, url, attachment);
+        var fileName = ResolveDownloadFileName(options, url!, attachment);
         using var downloadCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         downloadCts.CancelAfter(options.DownloadTimeout);
         var effectiveCt = downloadCts.Token;
 
         if (string.IsNullOrWhiteSpace(options.FilePath))
         {
-            using var response = await DownloadHttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, effectiveCt).ConfigureAwait(false);
+            using var response = await DownloadHttpClient.GetAsync(url!, HttpCompletionOption.ResponseHeadersRead, effectiveCt).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
             if (response.Content.Headers.ContentLength.HasValue && response.Content.Headers.ContentLength.Value > options.MaxInMemorySizeBytes)
@@ -160,13 +160,13 @@ internal sealed class AttachmentsModule : IAttachmentsModule
             return new AttachmentDownloadResult { Content = memoryStream.ToArray(), FileName = fileName };
         }
 
-        var savedFilePath = ResolveSavedFilePath(options.FilePath, url, attachment, options.DefaultExtension);
+        var savedFilePath = ResolveSavedFilePath(options.FilePath!, url!, attachment, options.DefaultExtension);
         var directory = Path.GetDirectoryName(savedFilePath);
         if (!string.IsNullOrWhiteSpace(directory))
             Directory.CreateDirectory(directory);
 
         // Потоковое скачивание непосредственно в файл без загрузки всего файла в RAM
-        using (var response = await DownloadHttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, effectiveCt).ConfigureAwait(false))
+        using (var response = await DownloadHttpClient.GetAsync(url!, HttpCompletionOption.ResponseHeadersRead, effectiveCt).ConfigureAwait(false))
         {
             response.EnsureSuccessStatusCode();
             using var streamToReadFrom = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);

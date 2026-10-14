@@ -10,7 +10,7 @@ public sealed class ImagePayload : AttachmentPayload
     /// Любой внешний URL изображения, которое вы хотите прикрепить
     /// </summary>
     [JsonPropertyName("url")]
-    public string Url { get; set; }
+    public string? Url { get; set; }
 
     /// <summary>
     /// Токен существующего вложения

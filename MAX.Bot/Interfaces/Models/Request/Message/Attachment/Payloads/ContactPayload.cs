@@ -6,7 +6,7 @@ public sealed class ContactPayload : AttachmentPayload
     /// Имя контакта
     /// </summary>
     [JsonPropertyName("name")]
-    public string Name { get; set; }
+    public string Name { get; set; } = string.Empty;
 
     /// <summary>
     /// ID контакта, если он зарегистирован в MAX
@@ -18,11 +18,11 @@ public sealed class ContactPayload : AttachmentPayload
     /// Полная информация о контакте в формате VCF
     /// </summary>
     [JsonPropertyName("vcf_info")]
-    public string VcfInfo { get; set; }
+    public string? VcfInfo { get; set; }
 
     /// <summary>
     /// Телефон контакта в формате VCF
     /// </summary>
     [JsonPropertyName("vcf_phone")]
-    public string VcfPhone { get; set; }
+    public string? VcfPhone { get; set; }
 }
